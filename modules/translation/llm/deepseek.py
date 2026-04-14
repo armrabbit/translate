@@ -29,3 +29,35 @@ class DeepseekTranslation(GPTTranslation):
         credentials = settings.get_credentials(settings.ui.tr('Deepseek'))
         self.api_key = credentials.get('api_key', '')
         self.model = MODEL_MAP.get(self.model_name)
+
+    def _perform_translation(self, user_prompt: str, system_prompt: str, image) -> str:
+        """
+        Perform translation using Deepseek's OpenAI-compatible chat completions API.
+
+        Deepseek expects `max_tokens` in the payload (not `max_completion_tokens`).
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+        messages = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": system_prompt}]
+            },
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": user_prompt}]
+            }
+        ]
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+        }
+
+        return self._make_api_request(payload, headers)

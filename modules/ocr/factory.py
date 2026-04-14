@@ -171,15 +171,19 @@ class OCRFactory:
             'Italian': lambda s: cls._create_ppocr(s, 'latin', effective_backend),
             'German': lambda s: cls._create_ppocr(s, 'latin', effective_backend),
             'Dutch': lambda s: cls._create_ppocr(s, 'latin', effective_backend),
+            'Thai': lambda s: cls._create_ppocr(s, 'latin', effective_backend),
         }
         
         # Check if we have a specific model factory
         if ocr_model in general:
             return general[ocr_model](settings)
         
-        # For Default, use language-specific engines
-        if ocr_model == 'Default' and source_lang_english in language_factories:
-            return language_factories[source_lang_english](settings)
+        # For Default, use language-specific engines. For unsupported languages,
+        # fall back to the multilingual Latin recognizer instead of returning None.
+        if ocr_model == 'Default':
+            if source_lang_english in language_factories:
+                return language_factories[source_lang_english](settings)
+            return cls._create_ppocr(settings, 'latin', effective_backend)
         
         return 
     

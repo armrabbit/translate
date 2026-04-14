@@ -158,16 +158,20 @@ class SettingsPage(QtWidgets.QWidget):
     def get_credentials(self, service: str = ""):
         save_keys = self.ui.save_keys_checkbox.isChecked()
 
-        def _text_or_none(widget_key):
-            w = self.ui.credential_widgets.get(widget_key)
-            return w.text() if w is not None else None
-
         if service:
             normalized = self.ui.value_mappings.get(service, service)
             creds = {'save_key': save_keys}
-            if normalized == "Custom":
-                for field in ("api_key", "api_url", "model"):
-                    creds[field] = _text_or_none(f"Custom_{field}")
+            prefixes = [f"{normalized}_"]
+            base_service = normalized.split("-", 1)[0]
+            if base_service != normalized:
+                prefixes.append(f"{base_service}_")
+
+            for widget_key, widget in self.ui.credential_widgets.items():
+                for prefix in prefixes:
+                    if widget_key.startswith(prefix):
+                        field = widget_key[len(prefix):]
+                        creds[field] = widget.text()
+                        break
 
             return creds
 
@@ -305,13 +309,13 @@ class SettingsPage(QtWidgets.QWidget):
         if save_keys:
             for service, cred in credentials.items():
                 translated_service = self.ui.value_mappings.get(service, service)
-                
-                if translated_service == "Custom":
-                    settings.setValue(f"{translated_service}_api_key", cred['api_key'])
-                    settings.setValue(f"{translated_service}_api_url", cred['api_url'])
-                    settings.setValue(f"{translated_service}_model", cred['model'])
+                prefix = f"{translated_service}_"
+                for field, value in cred.items():
+                    if field == "save_key":
+                        continue
+                    settings.setValue(f"{prefix}{field}", value)
         else:
-            settings.remove('credentials')  # Clear all credentials if save_keys is unchecked
+            settings.remove('')  # Clear all credentials if save_keys is unchecked
         settings.endGroup()
 
     def load_settings(self):
@@ -425,11 +429,10 @@ class SettingsPage(QtWidgets.QWidget):
         if save_keys:
             for service in self.ui.credential_services:
                 translated_service = self.ui.value_mappings.get(service, service)
-                
-                if translated_service == "Custom":
-                    self.ui.credential_widgets[f"{translated_service}_api_key"].setText(settings.value(f"{translated_service}_api_key", ''))
-                    self.ui.credential_widgets[f"{translated_service}_api_url"].setText(settings.value(f"{translated_service}_api_url", ''))
-                    self.ui.credential_widgets[f"{translated_service}_model"].setText(settings.value(f"{translated_service}_model", ''))
+                prefix = f"{translated_service}_"
+                for widget_key, widget in self.ui.credential_widgets.items():
+                    if widget_key.startswith(prefix):
+                        widget.setText(settings.value(widget_key, ''))
         settings.endGroup()
 
         # ADDED: Load user info and update account view 
