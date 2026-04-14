@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from PySide6.QtCore import QCoreApplication
 from typing import TYPE_CHECKING
@@ -36,26 +36,21 @@ def get_config(settings_page: SettingsPage):
     return config
 
 def validate_ocr(main: ComicTranslate):
-    """Ensure either API credentials are set or the user is authenticated."""
+    """Validate OCR tool availability."""
     settings_page = main.settings_page
-    tr = settings_page.ui.tr
     settings = settings_page.get_all_settings()
-    credentials = settings.get('credentials', {})
     ocr_tool = settings['tools']['ocr']
 
     if not ocr_tool:
         Messages.show_missing_tool_error(main, QCoreApplication.translate("Messages", "Text Recognition model"))
         return False
-    
-    if not settings_page.is_logged_in():
-        Messages.show_not_logged_in_error(main)
-        return False
-        
+
+    # Allow local/default OCR workflows without sign-in.
     return True
 
 
 def validate_translator(main: ComicTranslate, target_lang: str):
-    """Ensure either API credentials are set or the user is authenticated, plus check compatibility."""
+    """Validate translator availability and sign-in requirements."""
     settings_page = main.settings_page
     tr = settings_page.ui.tr
     settings = settings_page.get_all_settings()
@@ -66,23 +61,23 @@ def validate_translator(main: ComicTranslate, target_lang: str):
         Messages.show_missing_tool_error(main, QCoreApplication.translate("Messages", "Translator"))
         return False
 
+    # If not signed in, only local-key translators are allowed.
     if not settings_page.is_logged_in():
-        Messages.show_not_logged_in_error(main)
-        return False
+        if "Custom" not in translator_tool and "Deepseek" not in translator_tool:
+            Messages.show_not_logged_in_error(main)
+            return False
 
     # Credential checks
     if "Custom" in translator_tool:
-        # Custom requires api_key, api_url, and model to be configured LOCALLY
+        # Custom requires api_key, api_url, and model to be configured locally
         service = tr('Custom')
         creds = credentials.get(service, {})
-        # Check if all required fields are present and non-empty
         if not all([creds.get('api_key'), creds.get('api_url'), creds.get('model')]):
             Messages.show_custom_not_configured_error(main)
             return False
         return True
-        
-    return True
 
+    return True
 def font_selected(main: ComicTranslate):
     if not main.render_settings().font_family:
         Messages.select_font_error(main)
@@ -98,3 +93,5 @@ def validate_settings(main: ComicTranslate, target_lang: str):
         return False
     
     return True
+
+

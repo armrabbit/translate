@@ -1,4 +1,4 @@
-import json
+﻿import json
 import hashlib
 
 from .base import TranslationEngine
@@ -78,7 +78,8 @@ class TranslationFactory:
         """Get the appropriate engine class based on translator key."""
 
         access_token = get_token("access_token")
-        if access_token and translator_key not in ['Custom']:
+        keep_local_keys = ("Custom", "Deepseek")
+        if access_token and not any(key in translator_key for key in keep_local_keys):
             return UserTranslator
 
         # First check if it's a traditional translation engine (exact match)
