@@ -1,5 +1,7 @@
 import base64
+import ast
 import json
+import logging
 import re
 import jieba
 import janome.tokenizer
@@ -7,6 +9,8 @@ import numpy as np
 from pythainlp.tokenize import word_tokenize
 from .textblock import TextBlock
 import imkit as imk
+
+logger = logging.getLogger(__name__)
 
 
 MODEL_MAP = {
@@ -46,20 +50,92 @@ def get_raw_translation(blk_list: list[TextBlock]):
     return raw_translations_json
 
 def set_texts_from_json(blk_list: list[TextBlock], json_string: str):
+    if not isinstance(json_string, str):
+        logger.error("Translation response is not a string: %s", type(json_string).__name__)
+        return
+
     match = re.search(r"\{[\s\S]*\}", json_string)
-    if match:
-        # Extract the JSON string from the matched regular expression
-        json_string = match.group(0)
-        translation_dict = json.loads(json_string)
-        
-        for idx, blk in enumerate(blk_list):
-            block_key = f"block_{idx}"
-            if block_key in translation_dict:
-                blk.translation = translation_dict[block_key]
-            else:
-                print(f"Warning: {block_key} not found in JSON string.")
-    else:
-        print("No JSON found in the input string.")
+    if not match:
+        logger.error("No JSON object found in translation response. Preview: %r", json_string[:1000])
+        return
+
+    # Extract JSON object from LLM output that may include extra prose.
+    json_payload = match.group(0)
+    translation_dict = _parse_translation_dict(json_payload, json_string)
+    if translation_dict is None:
+        translation_dict = _extract_block_pairs(json_payload)
+        if translation_dict:
+            logger.warning(
+                "Recovered %s translation pairs from malformed JSON response.",
+                len(translation_dict),
+            )
+        else:
+            return
+
+    if not isinstance(translation_dict, dict):
+        logger.error("Parsed translation JSON is not an object: %s", type(translation_dict).__name__)
+        return
+
+    for idx, blk in enumerate(blk_list):
+        block_key = f"block_{idx}"
+        if block_key in translation_dict:
+            blk.translation = translation_dict[block_key]
+        else:
+            logger.warning("Missing key in translation JSON: %s", block_key)
+
+
+def _parse_translation_dict(json_payload: str, raw_response: str) -> dict | None:
+    decode_error: json.JSONDecodeError | None = None
+
+    attempts: list[str] = [json_payload]
+    attempts.append(re.sub(r",\s*([}\]])", r"\1", json_payload))
+    attempts.append(re.sub(r"([{,]\s*)(block_\d+)(\s*:)", r'\1"\2"\3', attempts[-1]))
+
+    for candidate in attempts:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError as exc:
+            decode_error = exc
+
+    try:
+        parsed = ast.literal_eval(json_payload)
+        if isinstance(parsed, dict):
+            return {str(key): value for key, value in parsed.items()}
+    except Exception:
+        pass
+
+    if decode_error is not None:
+        window_start = max(0, decode_error.pos - 120)
+        window_end = min(len(json_payload), decode_error.pos + 120)
+        logger.error(
+            "Failed to parse translation JSON at line=%s col=%s pos=%s: %s",
+            decode_error.lineno,
+            decode_error.colno,
+            decode_error.pos,
+            decode_error.msg,
+        )
+        logger.debug("Translation raw response preview: %r", raw_response[:1200])
+        logger.debug("Extracted JSON preview: %r", json_payload[:1200])
+        logger.debug("JSON context around error: %r", json_payload[window_start:window_end])
+
+    return None
+
+
+def _extract_block_pairs(json_payload: str) -> dict[str, str]:
+    pair_pattern = re.compile(
+        r'["\']?(block_\d+)["\']?\s*:\s*("((?:\\.|[^"\\])*)"|\'((?:\\.|[^\'\\])*)\')',
+        flags=re.DOTALL,
+    )
+    recovered: dict[str, str] = {}
+
+    for match in pair_pattern.finditer(json_payload):
+        block_key = match.group(1)
+        value = match.group(3) if match.group(3) is not None else match.group(4)
+        recovered[block_key] = value
+
+    return recovered
 
 def set_upper_case(blk_list: list[TextBlock], upper_case: bool):
     for blk in blk_list:
