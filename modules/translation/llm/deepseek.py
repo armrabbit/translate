@@ -29,6 +29,7 @@ class DeepseekTranslation(GPTTranslation):
         credentials = settings.get_credentials(settings.ui.tr('Deepseek'))
         self.api_key = credentials.get('api_key', '')
         self.model = MODEL_MAP.get(self.model_name)
+        self.timeout = 120
 
     def _perform_translation(self, user_prompt: str, system_prompt: str, image) -> str:
         """
@@ -61,3 +62,4 @@ class DeepseekTranslation(GPTTranslation):
         }
 
         return self._make_api_request(payload, headers)
+

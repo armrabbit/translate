@@ -2,7 +2,7 @@ from typing import Any
 import numpy as np
 import requests
 import json
-
+import time
 from .base import BaseLLMTranslation
 from ...utils.translator_utils import MODEL_MAP
 
@@ -94,24 +94,35 @@ class GPTTranslation(BaseLLMTranslation):
         """
         Make API request and process response
         """
-        try:
-            response = requests.post(
-                f"{self.api_base_url}/chat/completions",
-                headers=headers,
-                data=json.dumps(payload),
-                timeout=self.timeout
-            )
-            
-            response.raise_for_status()
-            response_data = response.json()
-            
-            return response_data["choices"][0]["message"]["content"]
-        except requests.exceptions.RequestException as e:
-            error_msg = f"API request failed: {str(e)}"
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    error_details = e.response.json()
-                    error_msg += f" - {json.dumps(error_details)}"
-                except:
-                    error_msg += f" - Status code: {e.response.status_code}"
-            raise RuntimeError(error_msg)
+        max_attempts = 3
+        last_error = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(
+                    f"{self.api_base_url}/chat/completions",
+                    headers=headers,
+                    data=json.dumps(payload),
+                    timeout=self.timeout
+                )
+                response.raise_for_status()
+                response_data = response.json()
+                return response_data["choices"][0]["message"]["content"]
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                last_error = e
+                if attempt < max_attempts:
+                    time.sleep(1.5 * attempt)
+                    continue
+                break
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                break
+
+        error_msg = f"API request failed: {str(last_error)}"
+        if hasattr(last_error, 'response') and last_error.response is not None:
+            try:
+                error_details = last_error.response.json()
+                error_msg += f" - {json.dumps(error_details)}"
+            except Exception:
+                error_msg += f" - Status code: {last_error.response.status_code}"
+        raise RuntimeError(error_msg)

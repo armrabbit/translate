@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
-from PySide6 import QtCore
+from PySide6 import QtCore, QtWidgets
 
 from modules.detection.processor import TextBlockDetector
 from modules.detection.utils.content import get_inpaint_bboxes
@@ -143,7 +143,55 @@ class ManualWorkflowController:
                 strokes.append(stroke)
         return strokes
 
-    def block_detect(self, load_rects: bool = True) -> None:
+    def _finish_and_continue(self, callback: Callable[[], None] | None = None) -> None:
+        self.main.on_manual_finished()
+        if callback is not None:
+            QtCore.QTimer.singleShot(0, callback)
+
+    def _confirm_stage(self, title: str, message: str) -> bool:
+        response = QtWidgets.QMessageBox.question(
+            self.main,
+            title,
+            message,
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.Yes,
+        )
+        return response == QtWidgets.QMessageBox.StandardButton.Yes
+
+    def run_all_staged_workflow(self) -> None:
+        if not self.main.image_files:
+            return
+
+        if self.main.page_list.count() > 0:
+            self.main.page_list.selectAll()
+
+        def after_detect_and_recognize() -> None:
+            if not self._confirm_stage(
+                self.main.tr("Check Recognition"),
+                self.main.tr("Detection + recognition finished. Check result first, then continue to Translate all pages?"),
+            ):
+                return
+            self.translate_image(finished_callback=after_translate)
+
+        def after_translate() -> None:
+            if not self._confirm_stage(
+                self.main.tr("Check Translation"),
+                self.main.tr("Translation finished. Check result first, then continue to Segment all pages?"),
+            ):
+                return
+            self.load_segmentation_points(finished_callback=after_segment)
+
+        def after_segment() -> None:
+            if not self._confirm_stage(
+                self.main.tr("Check Segmentation"),
+                self.main.tr("Segmentation finished. Check result first, then continue to Clean all pages?"),
+            ):
+                return
+            self.inpaint_and_set()
+
+        self.block_detect(load_rects=False, finished_callback=lambda: self.ocr(finished_callback=after_detect_and_recognize))
+
+    def block_detect(self, load_rects: bool = True, finished_callback: Callable[[], None] | None = None) -> None:
         selected_paths = self._selected_page_paths()
         if len(selected_paths) > 1:
             self.main.loading.setVisible(True)
@@ -200,7 +248,7 @@ class ManualWorkflowController:
                 detect_selected_pages,
                 on_detect_ready,
                 self.main.default_error_handler,
-                self.main.on_manual_finished,
+                lambda: self._finish_and_continue(finished_callback),
             )
             return
 
@@ -210,11 +258,11 @@ class ManualWorkflowController:
             self.main.pipeline.detect_blocks,
             self.main.pipeline.on_blk_detect_complete,
             self.main.default_error_handler,
-            self.main.on_manual_finished,
+            lambda: self._finish_and_continue(finished_callback),
             load_rects,
         )
 
-    def finish_ocr_translate(self, single_block: bool = False) -> None:
+    def finish_ocr_translate(self, single_block: bool = False, finished_callback: Callable[[], None] | None = None) -> None:
         if self.main.blk_list:
             if single_block:
                 rect = self.main.image_viewer.selected_rect
@@ -230,9 +278,9 @@ class ManualWorkflowController:
                 rect = self.main.rect_item_ctrl.find_corresponding_rect(first_block, 0.5)
             self.main.image_viewer.select_rectangle(rect)
         self.main.set_tool("box")
-        self.main.on_manual_finished()
+        self._finish_and_continue(finished_callback)
 
-    def ocr(self, single_block: bool = False) -> None:
+    def ocr(self, single_block: bool = False, finished_callback: Callable[[], None] | None = None) -> None:
         if not validate_ocr(self.main):
             return
         selected_paths = self._selected_page_paths()
@@ -287,7 +335,7 @@ class ManualWorkflowController:
                 ocr_selected_pages,
                 on_ocr_ready,
                 self.main.default_error_handler,
-                lambda: self.finish_ocr_translate(single_block),
+                lambda: self.finish_ocr_translate(single_block, finished_callback),
             )
             return
 
@@ -299,17 +347,17 @@ class ManualWorkflowController:
                 lambda: self.main.pipeline.OCR_webtoon_visible_area(single_block),
                 None,
                 self.main.default_error_handler,
-                lambda: self.finish_ocr_translate(single_block),
+                lambda: self.finish_ocr_translate(single_block, finished_callback),
             )
         else:
             self.main.run_threaded(
                 lambda: self.main.pipeline.OCR_image(single_block),
                 None,
                 self.main.default_error_handler,
-                lambda: self.finish_ocr_translate(single_block),
+                lambda: self.finish_ocr_translate(single_block, finished_callback),
             )
 
-    def translate_image(self, single_block: bool = False) -> None:
+    def translate_image(self, single_block: bool = False, finished_callback: Callable[[], None] | None = None) -> None:
         selected_paths = self._selected_page_paths()
         if len(selected_paths) > 1 and not single_block:
             has_any_text = False
@@ -387,7 +435,7 @@ class ManualWorkflowController:
                 translate_selected_pages,
                 on_translation_ready,
                 self.main.default_error_handler,
-                lambda: self.update_translated_text_items(single_block),
+                lambda: self.update_translated_text_items(single_block, finished_callback),
             )
             return
 
@@ -404,14 +452,14 @@ class ManualWorkflowController:
                 lambda: self.main.pipeline.translate_webtoon_visible_area(single_block),
                 None,
                 self.main.default_error_handler,
-                lambda: self.update_translated_text_items(single_block),
+                lambda: self.update_translated_text_items(single_block, finished_callback),
             )
         else:
             self.main.run_threaded(
                 lambda: self.main.pipeline.translate_image(single_block),
                 None,
                 self.main.default_error_handler,
-                lambda: self.update_translated_text_items(single_block),
+                lambda: self.update_translated_text_items(single_block, finished_callback),
             )
 
     def _get_visible_text_items(self) -> list[TextBlockItem]:
@@ -421,7 +469,7 @@ class ManualWorkflowController:
             self.main.image_viewer.text_items, self.main.image_viewer.webtoon_manager
         )
 
-    def update_translated_text_items(self, single_blk: bool) -> None:
+    def update_translated_text_items(self, single_blk: bool, finished_callback: Callable[[], None] | None = None) -> None:
         
         def set_new_text(
             text_item: TextBlockItem, 
@@ -436,7 +484,7 @@ class ManualWorkflowController:
 
         text_items_to_process = self._get_visible_text_items()
         if not text_items_to_process:
-            self.finish_ocr_translate(single_blk)
+            self.finish_ocr_translate(single_blk, finished_callback)
             return
 
         rs = self.main.render_settings()
@@ -491,7 +539,7 @@ class ManualWorkflowController:
                     *wrap_args,
                 )
 
-            self.main.run_finish_only(finished_callback=self.main.on_manual_finished)
+            self.main.run_finish_only(finished_callback=lambda: self._finish_and_continue(finished_callback))
 
         self.main.run_threaded(
             lambda: format_translations(self.main.blk_list, trg_lng_cd, upper_case=upper),
@@ -500,7 +548,7 @@ class ManualWorkflowController:
             on_format_finished,
         )
 
-    def inpaint_and_set(self) -> None:
+    def inpaint_and_set(self, finished_callback: Callable[[], None] | None = None) -> None:
         if not self.main.image_viewer.hasPhoto():
             return
 
@@ -579,7 +627,7 @@ class ManualWorkflowController:
                 inpaint_selected_pages,
                 on_selected_inpaint_ready,
                 self.main.default_error_handler,
-                self.main.on_manual_finished,
+                lambda: self._finish_and_continue(finished_callback),
             )
             return
 
@@ -592,7 +640,7 @@ class ManualWorkflowController:
                 self.main.pipeline.inpaint,
                 self.main.pipeline.inpaint_complete,
                 self.main.default_error_handler,
-                self.main.on_manual_finished,
+                lambda: self._finish_and_continue(finished_callback),
             )
 
     def blk_detect_segment(
@@ -612,7 +660,7 @@ class ManualWorkflowController:
                 self.main.image_viewer.draw_segmentation_lines(bboxes)
         self.main.undo_group.activeStack().endMacro()
 
-    def load_segmentation_points(self) -> None:
+    def load_segmentation_points(self, finished_callback: Callable[[], None] | None = None) -> None:
         if self.main.image_viewer.hasPhoto():
             self.main.text_ctrl.clear_text_edits()
             self.main.set_tool("brush")
@@ -684,7 +732,7 @@ class ManualWorkflowController:
                     compute_selected_bboxes,
                     on_selected_bboxes_ready,
                     on_selected_bboxes_error,
-                    self.main.on_manual_finished,
+                    lambda: self._finish_and_continue(finished_callback),
                 )
                 return
 
@@ -696,7 +744,7 @@ class ManualWorkflowController:
                         lambda: self.main.pipeline.segment_webtoon_visible_area(),
                         self._on_segmentation_bboxes_ready,
                         self.main.default_error_handler,
-                        self.main.on_manual_finished,
+                        lambda: self._finish_and_continue(finished_callback),
                     )
                 else:
 
@@ -712,7 +760,7 @@ class ManualWorkflowController:
                         compute_all_bboxes,
                         self._on_segmentation_bboxes_ready,
                         self.main.default_error_handler,
-                        self.main.on_manual_finished,
+                        lambda: self._finish_and_continue(finished_callback),
                     )
 
             else:
@@ -720,7 +768,7 @@ class ManualWorkflowController:
                     self.main.pipeline.detect_blocks,
                     self.blk_detect_segment,
                     self.main.default_error_handler,
-                    self.main.on_manual_finished,
+                    lambda: self._finish_and_continue(finished_callback),
                 )
 
     def _on_segmentation_bboxes_ready(

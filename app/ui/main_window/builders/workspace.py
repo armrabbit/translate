@@ -40,6 +40,7 @@ class WorkspaceMixin:
             {"text": self.tr("Segment"), "dayu_type": MPushButton.DefaultType, "enabled": False},
             {"text": self.tr("Clean"), "dayu_type": MPushButton.DefaultType, "enabled": False},
             {"text": self.tr("Render"), "dayu_type": MPushButton.DefaultType, "enabled": False},
+            {"text": self.tr("All"), "dayu_type": MPushButton.DefaultType, "enabled": False},
         ]
 
         self.hbutton_group = MPushButtonGroup()

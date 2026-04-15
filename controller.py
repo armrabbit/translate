@@ -183,12 +183,15 @@ class ComicTranslate(ComicTranslateUI):
         self.webtoon_toggle.clicked.connect(self.webtoon_ctrl.toggle_webtoon_mode)
 
         # Connect buttons from button_groups
-        self.hbutton_group.get_button_group().buttons()[0].clicked.connect(lambda: self.block_detect())
-        self.hbutton_group.get_button_group().buttons()[1].clicked.connect(self.ocr)
-        self.hbutton_group.get_button_group().buttons()[2].clicked.connect(self.translate_image)
-        self.hbutton_group.get_button_group().buttons()[3].clicked.connect(self.load_segmentation_points)
-        self.hbutton_group.get_button_group().buttons()[4].clicked.connect(self.inpaint_and_set)
-        self.hbutton_group.get_button_group().buttons()[5].clicked.connect(self.text_ctrl.render_text)
+        workflow_buttons = self.hbutton_group.get_button_group().buttons()
+        workflow_buttons[0].clicked.connect(lambda: self.block_detect())
+        workflow_buttons[1].clicked.connect(self.ocr)
+        workflow_buttons[2].clicked.connect(self.translate_image)
+        workflow_buttons[3].clicked.connect(self.load_segmentation_points)
+        workflow_buttons[4].clicked.connect(self.inpaint_and_set)
+        workflow_buttons[5].clicked.connect(self.text_ctrl.render_text)
+        if len(workflow_buttons) > 6:
+            workflow_buttons[6].clicked.connect(self.run_all_staged_workflow)
 
         self.undo_tool_group.get_button_group().buttons()[0].clicked.connect(self.undo_group.undo)
         self.undo_tool_group.get_button_group().buttons()[1].clicked.connect(self.undo_group.redo)
@@ -738,7 +741,10 @@ class ComicTranslate(ComicTranslateUI):
 
     def load_segmentation_points(self):
         self.manual_workflow_ctrl.load_segmentation_points()
-                
+
+    def run_all_staged_workflow(self):
+        self.manual_workflow_ctrl.run_all_staged_workflow()
+
     def _on_segmentation_bboxes_ready(self, results):
         self.manual_workflow_ctrl._on_segmentation_bboxes_ready(results)
 
