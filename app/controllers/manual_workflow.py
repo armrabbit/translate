@@ -176,26 +176,48 @@ class ManualWorkflowController:
 
     def run_all_staged_workflow(self) -> None:
         self._clear_verify()
-        if not self.main.image_files:
+        all_paths = list(self.main.image_files)
+        if not all_paths:
             return
 
-        if self.main.page_list.count() > 0:
-            self.main.page_list.selectAll()
-
         def after_detect_and_recognize() -> None:
-            self._pause_for_verify(lambda: self.translate_image(finished_callback=after_translate))
+            self._pause_for_verify(
+                lambda: self.translate_image(
+                    finished_callback=after_translate,
+                    selected_paths_override=all_paths,
+                )
+            )
 
         def after_translate() -> None:
-            self._pause_for_verify(lambda: self.load_segmentation_points(finished_callback=after_segment))
+            self._pause_for_verify(
+                lambda: self.load_segmentation_points(
+                    finished_callback=after_segment,
+                    selected_paths_override=all_paths,
+                )
+            )
 
         def after_segment() -> None:
-            self._pause_for_verify(lambda: self.inpaint_and_set())
+            self._pause_for_verify(
+                lambda: self.inpaint_and_set(selected_paths_override=all_paths)
+            )
 
-        self.block_detect(load_rects=False, finished_callback=lambda: self.ocr(finished_callback=after_detect_and_recognize))
+        self.block_detect(
+            load_rects=False,
+            finished_callback=lambda: self.ocr(
+                finished_callback=after_detect_and_recognize,
+                selected_paths_override=all_paths,
+            ),
+            selected_paths_override=all_paths,
+        )
 
-    def block_detect(self, load_rects: bool = True, finished_callback: Callable[[], None] | None = None) -> None:
+    def block_detect(
+        self,
+        load_rects: bool = True,
+        finished_callback: Callable[[], None] | None = None,
+        selected_paths_override: list[str] | None = None,
+    ) -> None:
         self._clear_verify()
-        selected_paths = self._selected_page_paths()
+        selected_paths = selected_paths_override if selected_paths_override is not None else self._selected_page_paths()
         if len(selected_paths) > 1:
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
@@ -283,11 +305,16 @@ class ManualWorkflowController:
         self.main.set_tool("box")
         self._finish_and_continue(finished_callback)
 
-    def ocr(self, single_block: bool = False, finished_callback: Callable[[], None] | None = None) -> None:
+    def ocr(
+        self,
+        single_block: bool = False,
+        finished_callback: Callable[[], None] | None = None,
+        selected_paths_override: list[str] | None = None,
+    ) -> None:
         self._clear_verify()
         if not validate_ocr(self.main):
             return
-        selected_paths = self._selected_page_paths()
+        selected_paths = selected_paths_override if selected_paths_override is not None else self._selected_page_paths()
         if len(selected_paths) > 1 and not single_block:
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
@@ -361,9 +388,14 @@ class ManualWorkflowController:
                 lambda: self.finish_ocr_translate(single_block, finished_callback),
             )
 
-    def translate_image(self, single_block: bool = False, finished_callback: Callable[[], None] | None = None) -> None:
+    def translate_image(
+        self,
+        single_block: bool = False,
+        finished_callback: Callable[[], None] | None = None,
+        selected_paths_override: list[str] | None = None,
+    ) -> None:
         self._clear_verify()
-        selected_paths = self._selected_page_paths()
+        selected_paths = selected_paths_override if selected_paths_override is not None else self._selected_page_paths()
         if len(selected_paths) > 1 and not single_block:
             has_any_text = False
             for file_path in selected_paths:
@@ -553,12 +585,16 @@ class ManualWorkflowController:
             on_format_finished,
         )
 
-    def inpaint_and_set(self, finished_callback: Callable[[], None] | None = None) -> None:
+    def inpaint_and_set(
+        self,
+        finished_callback: Callable[[], None] | None = None,
+        selected_paths_override: list[str] | None = None,
+    ) -> None:
         self._clear_verify()
         if not self.main.image_viewer.hasPhoto():
             return
 
-        selected_paths = self._selected_page_paths()
+        selected_paths = selected_paths_override if selected_paths_override is not None else self._selected_page_paths()
         if len(selected_paths) > 1:
             self.main.text_ctrl.clear_text_edits()
             self.main.loading.setVisible(True)
@@ -666,7 +702,11 @@ class ManualWorkflowController:
                 self.main.image_viewer.draw_segmentation_lines(bboxes)
         self.main.undo_group.activeStack().endMacro()
 
-    def load_segmentation_points(self, finished_callback: Callable[[], None] | None = None) -> None:
+    def load_segmentation_points(
+        self,
+        finished_callback: Callable[[], None] | None = None,
+        selected_paths_override: list[str] | None = None,
+    ) -> None:
         self._clear_verify()
         if self.main.image_viewer.hasPhoto():
             self.main.text_ctrl.clear_text_edits()
@@ -678,7 +718,7 @@ class ManualWorkflowController:
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
 
-            selected_paths = self._selected_page_paths()
+            selected_paths = selected_paths_override if selected_paths_override is not None else self._selected_page_paths()
             if len(selected_paths) > 1:
                 self.main.undo_group.activeStack().beginMacro("draw_segmentation_boxes")
                 context = self._prepare_multi_page_context(selected_paths)
