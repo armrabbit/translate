@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore
 
 from modules.detection.processor import TextBlockDetector
 from modules.detection.utils.content import get_inpaint_bboxes
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 class ManualWorkflowController:
     def __init__(self, main: ComicTranslate) -> None:
         self.main = main
+        self._all_verify_next: Callable[[], None] | None = None
 
     def _current_file_path(self) -> str | None:
         if 0 <= self.main.curr_img_idx < len(self.main.image_files):
@@ -148,50 +149,52 @@ class ManualWorkflowController:
         if callback is not None:
             QtCore.QTimer.singleShot(0, callback)
 
-    def _confirm_stage(self, title: str, message: str) -> bool:
-        response = QtWidgets.QMessageBox.question(
-            self.main,
-            title,
-            message,
-            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
-            QtWidgets.QMessageBox.StandardButton.Yes,
-        )
-        return response == QtWidgets.QMessageBox.StandardButton.Yes
+    def _clear_verify(self) -> None:
+        self._all_verify_next = None
+        try:
+            self.main.set_verify_button_enabled(False)
+        except Exception:
+            pass
+
+    def sync_verify_button_state(self) -> None:
+        try:
+            self.main.set_verify_button_enabled(self._all_verify_next is not None)
+        except Exception:
+            pass
+
+    def _pause_for_verify(self, next_action: Callable[[], None]) -> None:
+        self._all_verify_next = next_action
+        self.sync_verify_button_state()
+
+    def verify_all_stage(self) -> None:
+        next_action = self._all_verify_next
+        if next_action is None:
+            return
+        self._all_verify_next = None
+        self.sync_verify_button_state()
+        QtCore.QTimer.singleShot(0, next_action)
 
     def run_all_staged_workflow(self) -> None:
         if not self.main.image_files:
             return
 
+        self._clear_verify()
         if self.main.page_list.count() > 0:
             self.main.page_list.selectAll()
 
         def after_detect_and_recognize() -> None:
-            if not self._confirm_stage(
-                self.main.tr("Check Recognition"),
-                self.main.tr("Detection + recognition finished. Check result first, then continue to Translate all pages?"),
-            ):
-                return
-            self.translate_image(finished_callback=after_translate)
+            self._pause_for_verify(lambda: self.translate_image(finished_callback=after_translate))
 
         def after_translate() -> None:
-            if not self._confirm_stage(
-                self.main.tr("Check Translation"),
-                self.main.tr("Translation finished. Check result first, then continue to Segment all pages?"),
-            ):
-                return
-            self.load_segmentation_points(finished_callback=after_segment)
+            self._pause_for_verify(lambda: self.load_segmentation_points(finished_callback=after_segment))
 
         def after_segment() -> None:
-            if not self._confirm_stage(
-                self.main.tr("Check Segmentation"),
-                self.main.tr("Segmentation finished. Check result first, then continue to Clean all pages?"),
-            ):
-                return
-            self.inpaint_and_set()
+            self._pause_for_verify(lambda: self.inpaint_and_set())
 
         self.block_detect(load_rects=False, finished_callback=lambda: self.ocr(finished_callback=after_detect_and_recognize))
 
     def block_detect(self, load_rects: bool = True, finished_callback: Callable[[], None] | None = None) -> None:
+        self._clear_verify()
         selected_paths = self._selected_page_paths()
         if len(selected_paths) > 1:
             self.main.loading.setVisible(True)
@@ -281,6 +284,7 @@ class ManualWorkflowController:
         self._finish_and_continue(finished_callback)
 
     def ocr(self, single_block: bool = False, finished_callback: Callable[[], None] | None = None) -> None:
+        self._clear_verify()
         if not validate_ocr(self.main):
             return
         selected_paths = self._selected_page_paths()
@@ -358,6 +362,7 @@ class ManualWorkflowController:
             )
 
     def translate_image(self, single_block: bool = False, finished_callback: Callable[[], None] | None = None) -> None:
+        self._clear_verify()
         selected_paths = self._selected_page_paths()
         if len(selected_paths) > 1 and not single_block:
             has_any_text = False
@@ -549,6 +554,7 @@ class ManualWorkflowController:
         )
 
     def inpaint_and_set(self, finished_callback: Callable[[], None] | None = None) -> None:
+        self._clear_verify()
         if not self.main.image_viewer.hasPhoto():
             return
 
@@ -661,6 +667,7 @@ class ManualWorkflowController:
         self.main.undo_group.activeStack().endMacro()
 
     def load_segmentation_points(self, finished_callback: Callable[[], None] | None = None) -> None:
+        self._clear_verify()
         if self.main.image_viewer.hasPhoto():
             self.main.text_ctrl.clear_text_edits()
             self.main.set_tool("brush")

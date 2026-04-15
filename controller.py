@@ -192,6 +192,8 @@ class ComicTranslate(ComicTranslateUI):
         workflow_buttons[5].clicked.connect(self.text_ctrl.render_text)
         if len(workflow_buttons) > 6:
             workflow_buttons[6].clicked.connect(self.run_all_staged_workflow)
+        if len(workflow_buttons) > 7:
+            workflow_buttons[7].clicked.connect(self.verify_all_stage)
 
         self.undo_tool_group.get_button_group().buttons()[0].clicked.connect(self.undo_group.undo)
         self.undo_tool_group.get_button_group().buttons()[1].clicked.connect(self.undo_group.redo)
@@ -714,6 +716,16 @@ class ComicTranslate(ComicTranslateUI):
     def enable_hbutton_group(self):
         for button in self.hbutton_group.get_button_group().buttons():
             button.setEnabled(True)
+        # Keep Verify disabled unless the staged All workflow is waiting.
+        try:
+            self.manual_workflow_ctrl.sync_verify_button_state()
+        except Exception:
+            pass
+
+    def set_verify_button_enabled(self, enabled: bool) -> None:
+        buttons = self.hbutton_group.get_button_group().buttons()
+        if len(buttons) > 7:
+            buttons[7].setEnabled(enabled)
 
     def block_detect(self, load_rects: bool = True):
         self.manual_workflow_ctrl.block_detect(load_rects)
@@ -744,6 +756,9 @@ class ComicTranslate(ComicTranslateUI):
 
     def run_all_staged_workflow(self):
         self.manual_workflow_ctrl.run_all_staged_workflow()
+
+    def verify_all_stage(self):
+        self.manual_workflow_ctrl.verify_all_stage()
 
     def _on_segmentation_bboxes_ready(self, results):
         self.manual_workflow_ctrl._on_segmentation_bboxes_ready(results)
