@@ -175,10 +175,10 @@ class ManualWorkflowController:
         QtCore.QTimer.singleShot(0, next_action)
 
     def run_all_staged_workflow(self) -> None:
+        self._clear_verify()
         if not self.main.image_files:
             return
 
-        self._clear_verify()
         if self.main.page_list.count() > 0:
             self.main.page_list.selectAll()
 

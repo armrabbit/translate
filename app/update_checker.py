@@ -39,6 +39,7 @@ class UpdateChecker(QObject):
         except Exception as e:
             logger.error(f"Error stopping thread: {e}")
         self._worker_thread = None
+        self._worker = None
 
     def check_for_updates(self):
         """Starts the check in a background thread."""
@@ -88,6 +89,8 @@ class UpdateChecker(QObject):
                 os.startfile(file_path)
             elif system == "Darwin": # macOS
                 subprocess.Popen(["open", file_path])
+            else:
+                self.error_occurred.emit(f"Unsupported platform for installer launch: {system}")
         except Exception as e:
             self.error_occurred.emit(f"Failed to launch installer: {e}")
 
@@ -120,7 +123,6 @@ class UpdateWorker(QObject):
             latest_tag = data.get("tag_name", "").lstrip("v")
             if not latest_tag:
                  self.error.emit("Could not parse version from release.")
-                 self.finished.emit()
                  return
 
             if version.parse(latest_tag) > version.parse(self.current_version):
@@ -129,13 +131,15 @@ class UpdateWorker(QObject):
                 system = platform.system()
                 if system == "Windows":
                     for asset in data.get("assets", []):
-                        if asset["name"].endswith(".exe") or asset["name"].endswith(".msi"):
-                            asset_url = asset["browser_download_url"]
+                        asset_name = asset.get("name", "")
+                        if asset_name.endswith(".exe") or asset_name.endswith(".msi"):
+                            asset_url = asset.get("browser_download_url")
                             break
                 elif system == "Darwin":
                     for asset in data.get("assets", []):
-                        if asset["name"].endswith(".dmg") or asset["name"].endswith(".pkg"):
-                            asset_url = asset["browser_download_url"]
+                        asset_name = asset.get("name", "")
+                        if asset_name.endswith(".dmg") or asset_name.endswith(".pkg"):
+                            asset_url = asset.get("browser_download_url")
                             break
                 
                 if asset_url:
@@ -196,3 +200,4 @@ class DownloadWorker(QObject):
             self.error.emit(str(e))
         finally:
             self.finished.emit()
+
