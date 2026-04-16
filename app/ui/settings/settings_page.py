@@ -897,6 +897,26 @@ class SettingsPage(QtWidgets.QWidget):
         )
 
     def on_update_error(self, message):
+        msg_lower = (message or "").lower()
+        no_release_metadata = (
+            "releases/latest" in msg_lower
+            and ("404" in msg_lower or "not found" in msg_lower)
+        )
+
+        if no_release_metadata:
+            if self._is_background_check:
+                logger.info("Background update check skipped: no GitHub release published yet.")
+                return
+
+            self.ui.check_update_button.setEnabled(True)
+            self.ui.check_update_button.setText(self.tr("Check for Updates"))
+            self._show_message_box(
+                QtWidgets.QMessageBox.Icon.Information,
+                self.tr("No Release Found"),
+                self.tr("No GitHub release has been published for this repository yet."),
+            )
+            return
+
         if self._is_background_check:
             logger.error(f"Background update check failed: {message}")
             return
