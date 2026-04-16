@@ -253,9 +253,36 @@ def visualize_speech_bubbles(canvas, blk_list: List[TextBlock]):
     # Convert back to numpy array
     return np.array(pil_image)
 
+def normalize_bbox_to_image(coords, img: np.ndarray):
+    if coords is None:
+        return None
+    try:
+        x1, y1, x2, y2 = coords
+    except Exception:
+        return None
+
+    if img is None or len(img.shape) < 2:
+        return None
+    im_h, im_w = img.shape[:2]
+
+    x1 = int(np.floor(float(x1)))
+    y1 = int(np.floor(float(y1)))
+    x2 = int(np.ceil(float(x2)))
+    y2 = int(np.ceil(float(y2)))
+
+    x1 = max(0, min(x1, im_w))
+    y1 = max(0, min(y1, im_h))
+    x2 = max(0, min(x2, im_w))
+    y2 = max(0, min(y2, im_h))
+
+    if x1 >= x2 or y1 >= y2:
+        return None
+
+    return x1, y1, x2, y2
+
 def adjust_text_line_coordinates(coords, width_expansion_percentage: int, height_expansion_percentage: int, img: np.ndarray):
     top_left_x, top_left_y, bottom_right_x, bottom_right_y = coords
-    im_h, im_w, _ = img.shape
+    im_h, im_w = img.shape[:2]
     
     # Calculate width, height, and respective expansion offsets
     width = bottom_right_x - top_left_x
@@ -264,12 +291,16 @@ def adjust_text_line_coordinates(coords, width_expansion_percentage: int, height
     height_expansion_offset = int(((height * height_expansion_percentage) / 100) / 2)
 
     # Define the rectangle origin points (bottom left, top right) with expansion/contraction
-    new_x1 = max(top_left_x - width_expansion_offset, 0)
-    new_y1 = max(top_left_y - height_expansion_offset, 0)
-    new_x2 = min(bottom_right_x + width_expansion_offset, im_w)
-    new_y2 = min(bottom_right_y + height_expansion_offset, im_h)
+    new_x1 = top_left_x - width_expansion_offset
+    new_y1 = top_left_y - height_expansion_offset
+    new_x2 = bottom_right_x + width_expansion_offset
+    new_y2 = bottom_right_y + height_expansion_offset
 
-    return new_x1, new_y1, new_x2, new_y2
+    normalized = normalize_bbox_to_image((new_x1, new_y1, new_x2, new_y2), img)
+    if normalized is None:
+        return 0, 0, 0, 0
+
+    return normalized
 
 def adjust_blks_size(blk_list: List[TextBlock], img: np.ndarray, w_expan: int = 0, h_expan: int = 0):
     for blk in blk_list:

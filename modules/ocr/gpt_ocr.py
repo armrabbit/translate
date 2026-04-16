@@ -3,7 +3,7 @@ import requests
 import json
 
 from .base import OCREngine
-from ..utils.textblock import TextBlock, adjust_text_line_coordinates
+from ..utils.textblock import TextBlock, adjust_text_line_coordinates, normalize_bbox_to_image
 from ..utils.translator_utils import MODEL_MAP
 
 
@@ -45,14 +45,19 @@ class GPTOCR(OCREngine):
         for blk in blk_list:
             # Get box coordinates
             if blk.bubble_xyxy is not None:
-                x1, y1, x2, y2 = blk.bubble_xyxy
+                raw_coords = blk.bubble_xyxy
             else:
-                x1, y1, x2, y2 = adjust_text_line_coordinates(
+                raw_coords = adjust_text_line_coordinates(
                     blk.xyxy, 
                     self.expansion_percentage, 
                     self.expansion_percentage, 
                     img
                 )
+            normalized = normalize_bbox_to_image(raw_coords, img)
+            if normalized is None:
+                blk.text = ""
+                continue
+            x1, y1, x2, y2 = normalized
             
             # Check if coordinates are valid
             if x1 < x2 and y1 < y2 and x1 >= 0 and y1 >= 0 and x2 <= img.shape[1] and y2 <= img.shape[0]:

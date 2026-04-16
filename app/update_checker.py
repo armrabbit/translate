@@ -1,6 +1,7 @@
 import os
 import platform
 import logging
+import re
 import requests
 import subprocess
 import tempfile
@@ -20,13 +21,50 @@ class UpdateChecker(QObject):
     download_progress = Signal(int)
     download_finished = Signal(str) # file_path
 
-    REPO_OWNER = "ogkalu2"
-    REPO_NAME = "comic-translate"
+    REPO_OWNER = "armrabbit"
+    REPO_NAME = "translate"
+    REPO_URL = "https://github.com/armrabbit/translate#"
 
     def __init__(self):
         super().__init__()
+        self.repo_owner, self.repo_name = self._resolve_repo_target()
         self._worker_thread = None
         self._worker = None
+
+    def _resolve_repo_target(self) -> tuple[str, str]:
+        repo_url = (os.getenv("COMICTRANSLATE_UPDATE_REPO_URL", self.REPO_URL) or self.REPO_URL).strip()
+        parsed = self._parse_github_repo(repo_url)
+        if parsed is not None:
+            return parsed
+
+        owner = (os.getenv("COMICTRANSLATE_UPDATE_REPO_OWNER", self.REPO_OWNER) or self.REPO_OWNER).strip() or self.REPO_OWNER
+        name = (os.getenv("COMICTRANSLATE_UPDATE_REPO_NAME", self.REPO_NAME) or self.REPO_NAME).strip() or self.REPO_NAME
+        return owner, name
+
+    @staticmethod
+    def _parse_github_repo(repo_url: str) -> tuple[str, str] | None:
+        if not repo_url:
+            return None
+
+        cleaned = repo_url.strip()
+        if not cleaned:
+            return None
+
+        cleaned = cleaned.split("#", 1)[0].rstrip("/")
+        if cleaned.endswith(".git"):
+            cleaned = cleaned[:-4]
+
+        # Supports:
+        # - https://github.com/owner/repo
+        # - https://github.com/owner/repo#
+        # - git@github.com:owner/repo
+        # - owner/repo
+        pattern = r"(?:github\.com[:/]+)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$"
+        match = re.search(pattern, cleaned, re.IGNORECASE)
+        if not match:
+            return None
+
+        return match.group(1), match.group(2)
 
     def _safe_stop_thread(self):
         try:
@@ -46,7 +84,7 @@ class UpdateChecker(QObject):
         self._safe_stop_thread()
             
         self._worker_thread = QThread()
-        self._worker = UpdateWorker(self.REPO_OWNER, self.REPO_NAME, __version__)
+        self._worker = UpdateWorker(self.repo_owner, self.repo_name, __version__)
         self._worker.moveToThread(self._worker_thread)
         
         self._worker.finished.connect(self._worker_thread.quit)

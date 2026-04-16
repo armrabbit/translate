@@ -28,9 +28,21 @@ class ManualWorkflowController:
         self.main = main
         self._all_verify_next: Callable[[], None] | None = None
 
-    def _current_file_path(self) -> str | None:
+    def _active_page_index(self) -> int:
+        if self.main.webtoon_mode:
+            manager = getattr(self.main.image_viewer, "webtoon_manager", None)
+            layout_mgr = getattr(manager, "layout_manager", None) if manager is not None else None
+            page_idx = getattr(layout_mgr, "current_page_index", None) if layout_mgr is not None else None
+            if isinstance(page_idx, int) and 0 <= page_idx < len(self.main.image_files):
+                return page_idx
         if 0 <= self.main.curr_img_idx < len(self.main.image_files):
-            return self.main.image_files[self.main.curr_img_idx]
+            return self.main.curr_img_idx
+        return -1
+
+    def _current_file_path(self) -> str | None:
+        page_idx = self._active_page_index()
+        if 0 <= page_idx < len(self.main.image_files):
+            return self.main.image_files[page_idx]
         return None
 
     def _selected_page_paths(self) -> list[str]:
@@ -45,6 +57,7 @@ class ManualWorkflowController:
         return img
 
     def _prepare_multi_page_context(self, selected_paths: list[str]) -> dict[str, Any]:
+        current_page_idx = self._active_page_index()
         current_file = self._current_file_path()
         current_page_unloaded = False
         if self.main.webtoon_mode:
@@ -54,20 +67,21 @@ class ManualWorkflowController:
                 scene_mgr.save_all_scene_items_to_states()
                 if (
                     current_file in selected_paths
-                    and 0 <= self.main.curr_img_idx < len(self.main.image_files)
-                    and self.main.curr_img_idx in manager.loaded_pages
+                    and 0 <= current_page_idx < len(self.main.image_files)
+                    and current_page_idx in manager.loaded_pages
                 ):
-                    scene_mgr.unload_page_scene_items(self.main.curr_img_idx)
+                    scene_mgr.unload_page_scene_items(current_page_idx)
                     current_page_unloaded = True
         else:
             self.main.image_ctrl.save_current_image_state()
 
         return {
             "current_file": current_file,
+            "current_page_idx": current_page_idx,
             "current_page_unloaded": current_page_unloaded,
         }
 
-    def _reload_current_webtoon_page(self) -> None:
+    def _reload_current_webtoon_page(self, page_idx: int | None = None) -> None:
         if not self.main.webtoon_mode:
             return
         manager = getattr(self.main.image_viewer, "webtoon_manager", None)
@@ -76,7 +90,8 @@ class ManualWorkflowController:
         scene_mgr = getattr(manager, "scene_item_manager", None)
         if scene_mgr is None:
             return
-        page_idx = self.main.curr_img_idx
+        if page_idx is None:
+            page_idx = self._active_page_index()
         if not (0 <= page_idx < len(self.main.image_files)):
             return
         if page_idx not in manager.loaded_pages:
@@ -84,7 +99,7 @@ class ManualWorkflowController:
         scene_mgr.load_page_scene_items(page_idx)
         self.main.text_ctrl.clear_text_edits()
 
-    def _copy_blocks_for_current_webtoon_page(self, blk_list: list[TextBlock]) -> list[TextBlock]:
+    def _copy_blocks_for_current_webtoon_page(self, blk_list: list[TextBlock], page_idx: int | None = None) -> list[TextBlock]:
         blocks = [
             blk.deep_copy() if hasattr(blk, "deep_copy") else blk
             for blk in (blk_list or [])
@@ -95,7 +110,8 @@ class ManualWorkflowController:
         manager = getattr(self.main.image_viewer, "webtoon_manager", None)
         scene_mgr = getattr(manager, "scene_item_manager", None) if manager is not None else None
         text_block_mgr = getattr(scene_mgr, "text_block_manager", None) if scene_mgr is not None else None
-        page_idx = self.main.curr_img_idx
+        if page_idx is None:
+            page_idx = self._active_page_index()
         if text_block_mgr is None or page_idx < 0 or page_idx >= len(self.main.image_files):
             return blocks
 
@@ -108,16 +124,17 @@ class ManualWorkflowController:
         blk_list: list[TextBlock],
         *,
         current_page_unloaded: bool = False,
+        current_page_idx: int | None = None,
     ) -> None:
         if not self.main.webtoon_mode:
             self.main.blk_list = [blk.deep_copy() if hasattr(blk, "deep_copy") else blk for blk in blk_list]
             return
 
         if current_page_unloaded:
-            self._reload_current_webtoon_page()
+            self._reload_current_webtoon_page(current_page_idx)
             return
 
-        self.main.blk_list = self._copy_blocks_for_current_webtoon_page(blk_list)
+        self.main.blk_list = self._copy_blocks_for_current_webtoon_page(blk_list, current_page_idx)
 
     def _serialize_rectangles_from_blocks(self, blk_list: list[TextBlock]) -> list[dict]:
         rects: list[dict] = []
@@ -260,6 +277,7 @@ class ManualWorkflowController:
                     if self.main.webtoon_mode:
                         self._set_current_blocks_from_page_state(
                             current_blocks,
+                            current_page_idx=context["current_page_idx"],
                             current_page_unloaded=context["current_page_unloaded"],
                         )
                     elif load_rects:
@@ -356,6 +374,7 @@ class ManualWorkflowController:
                     if file_path == current_file:
                         self._set_current_blocks_from_page_state(
                             blk_list,
+                            current_page_idx=context["current_page_idx"],
                             current_page_unloaded=context["current_page_unloaded"],
                         )
 
@@ -462,6 +481,7 @@ class ManualWorkflowController:
                     if file_path == current_file:
                         self._set_current_blocks_from_page_state(
                             blk_list,
+                            current_page_idx=context["current_page_idx"],
                             current_page_unloaded=context["current_page_unloaded"],
                         )
 
@@ -660,7 +680,7 @@ class ManualWorkflowController:
                     self.main.image_viewer.clear_brush_strokes(page_switch=True)
 
                 if self.main.webtoon_mode and context["current_page_unloaded"]:
-                    self._reload_current_webtoon_page()
+                    self._reload_current_webtoon_page(context["current_page_idx"])
 
                 if processed_any:
                     self.main.mark_project_dirty()
@@ -751,6 +771,7 @@ class ManualWorkflowController:
                         if file_path == current_file:
                             self._set_current_blocks_from_page_state(
                                 blk_list,
+                                current_page_idx=context["current_page_idx"],
                                 current_page_unloaded=context["current_page_unloaded"],
                             )
 

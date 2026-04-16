@@ -11,7 +11,7 @@ from modules.ocr.base import OCREngine
 from modules.utils.device import get_providers
 from modules.utils.onnx import make_session, make_session_options
 from modules.utils.textblock import TextBlock
-from modules.utils.textblock import adjust_text_line_coordinates
+from modules.utils.textblock import adjust_text_line_coordinates, normalize_bbox_to_image
 from .pororo.models.brainOCR.brainocr import Reader
 from .pororo.models.brainOCR.detection import (
     resize_aspect_ratio,
@@ -240,14 +240,19 @@ class PororoOCREngineONNX(OCREngine):
 
         for blk in blk_list:
             if getattr(blk, 'bubble_xyxy', None) is not None:
-                x1, y1, x2, y2 = blk.bubble_xyxy
+                raw_coords = blk.bubble_xyxy
             else:
-                x1, y1, x2, y2 = adjust_text_line_coordinates(
+                raw_coords = adjust_text_line_coordinates(
                     blk.xyxy,
                     getattr(self, 'expansion_percentage', 5),
                     getattr(self, 'expansion_percentage', 5),
                     img,
                 )
+            normalized = normalize_bbox_to_image(raw_coords, img)
+            if normalized is None:
+                blk.text = ''
+                continue
+            x1, y1, x2, y2 = normalized
             if x1 < x2 and y1 < y2 and x1 >= 0 and y1 >= 0 and x2 <= img.shape[1] and y2 <= img.shape[0]:
                 cropped = img[y1:y2, x1:x2]
                 # run full pipeline on cropped region
