@@ -284,17 +284,18 @@ class DrawingManager:
                 dtype=np.uint8,
             )
         elif mode == 'restore':
-            restore_base = main.image_ctrl.get_restore_base_image(file_path)
-            if restore_base is None:
+            # Restore tool should pull pixels from the original source image.
+            original = main.image_ctrl.get_original_image(file_path)
+            if original is None:
                 return False
-            if restore_base.shape[:2] != edited.shape[:2]:
+            if original.shape[:2] != edited.shape[:2]:
                 logger.warning(
-                    "Restore skipped due to image size mismatch: restore_base=%s current=%s",
-                    restore_base.shape[:2],
+                    "Restore skipped due to image size mismatch: original=%s current=%s",
+                    original.shape[:2],
                     edited.shape[:2],
                 )
                 return False
-            edited[mask] = restore_base[mask]
+            edited[mask] = original[mask]
         else:
             return False
 
