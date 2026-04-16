@@ -3,6 +3,8 @@ English | [Korean](docs/README_ko.md) | [French](docs/README_fr.md) | [Simplifie
 
 Comic Translate is a desktop app for translating comic pages (manga, webtoon, and western comics) with OCR + LLM-based translation + inpainting + text rendering.
 
+This project was developed based on [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate).
+
 ## Highlights
 - Automatic batch translation for many pages.
 - Manual editing workflow with stage-by-stage controls:
