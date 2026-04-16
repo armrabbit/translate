@@ -12,6 +12,11 @@ from app.ui.commands.brush import BrushStrokeCommand, ClearBrushStrokesCommand, 
 from app.ui.commands.base import PathCommandBase as pcb
 import imkit as imk
 
+try:
+    from shiboken6 import isValid as _shiboken_is_valid
+except Exception:
+    _shiboken_is_valid = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,8 +44,32 @@ class DrawingManager:
         self.after_erase_state = []
         self._webtoon_direct_edit_warned = False
 
+    def _is_live_item(self, item) -> bool:
+        if item is None:
+            return False
+        if _shiboken_is_valid is not None:
+            try:
+                return bool(_shiboken_is_valid(item))
+            except Exception:
+                return False
+        try:
+            item.scene()
+            return True
+        except RuntimeError:
+            return False
+
+    def _cancel_current_stroke(self) -> None:
+        self.current_path = None
+        self.current_path_item = None
+        self.viewer.drawing_path = None
+
     def start_stroke(self, scene_pos: QPointF):
         """Starts a new drawing or erasing stroke."""
+        # Safety: if a previous stroke was interrupted by scene/page changes,
+        # clear stale pointers before creating a new one.
+        if self.current_path is not None or self.current_path_item is not None:
+            self._cancel_current_stroke()
+
         self.viewer.drawing_path = QPainterPath() # drawing_path is on viewer in original
         self.viewer.drawing_path.moveTo(scene_pos)
         
@@ -86,21 +115,34 @@ class DrawingManager:
 
         self.current_path.lineTo(scene_pos)
         if self.viewer.current_tool in {'brush', 'paint', 'restore'} and self.current_path_item:
-            self.current_path_item.setPath(self.current_path)
+            if not self._is_live_item(self.current_path_item):
+                self._cancel_current_stroke()
+                return
+            try:
+                self.current_path_item.setPath(self.current_path)
+            except RuntimeError:
+                # The underlying C++ item can be deleted by scene/page switches.
+                self._cancel_current_stroke()
+                return
         elif self.viewer.current_tool == 'eraser':
             self.erase_at(scene_pos)
 
     def end_stroke(self):
         """Finalizes the current stroke and creates an undo command."""
-        if self.current_path_item and self.viewer.current_tool == 'brush':
-                command = BrushStrokeCommand(self.viewer, self.current_path_item)
+        live_path_item = self.current_path_item if self._is_live_item(self.current_path_item) else None
+
+        if live_path_item and self.viewer.current_tool == 'brush':
+                command = BrushStrokeCommand(self.viewer, live_path_item)
                 self.viewer.command_emitted.emit(command)
         elif self.current_path_item and self.viewer.current_tool in {'paint', 'restore'}:
             applied = self._apply_direct_brush_operation(self.viewer.current_tool)
             # Keep the visual stroke if apply failed in regular mode
             # (prevents "stroke disappears" behavior when update cannot be applied).
-            if applied or self.viewer.webtoon_mode:
-                self._scene.removeItem(self.current_path_item)
+            if (applied or self.viewer.webtoon_mode) and live_path_item is not None:
+                try:
+                    self._scene.removeItem(live_path_item)
+                except RuntimeError:
+                    pass
 
         if self.viewer.current_tool == 'eraser':
             # Capture the current state after erase operation
@@ -132,9 +174,7 @@ class DrawingManager:
             else:
                 print("Warning: No before_erase_state found, skipping undo command creation")
         
-        self.current_path = None
-        self.current_path_item = None
-        self.viewer.drawing_path = None
+        self._cancel_current_stroke()
 
     def _active_file_path(self):
         main = self._resolve_main_window()
@@ -397,6 +437,7 @@ class DrawingManager:
                 
     def clear_brush_strokes(self, page_switch=False):
         if page_switch:      
+            self._cancel_current_stroke()
             items_to_remove = [item for item in self._scene.items()
                                if isinstance(item, QGraphicsPathItem) and item != self.viewer.photo]
             for item in items_to_remove:
