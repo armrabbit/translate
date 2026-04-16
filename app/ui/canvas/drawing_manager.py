@@ -96,8 +96,11 @@ class DrawingManager:
                 command = BrushStrokeCommand(self.viewer, self.current_path_item)
                 self.viewer.command_emitted.emit(command)
         elif self.current_path_item and self.viewer.current_tool in {'paint', 'restore'}:
-            self._apply_direct_brush_operation(self.viewer.current_tool)
-            self._scene.removeItem(self.current_path_item)
+            applied = self._apply_direct_brush_operation(self.viewer.current_tool)
+            # Keep the visual stroke if apply failed in regular mode
+            # (prevents "stroke disappears" behavior when update cannot be applied).
+            if applied or self.viewer.webtoon_mode:
+                self._scene.removeItem(self.current_path_item)
 
         if self.viewer.current_tool == 'eraser':
             # Capture the current state after erase operation
@@ -178,24 +181,21 @@ class DrawingManager:
         mask = self._extract_qimage_bytes(qimg) > 0
         return mask
 
-    def _apply_direct_brush_operation(self, mode: str):
+    def _apply_direct_brush_operation(self, mode: str) -> bool:
         if not self.current_path:
-            return
+            return False
 
         main, file_path = self._active_file_path()
         if main is None or file_path is None:
-            return
+            return False
 
         if self.viewer.webtoon_mode:
             self._show_webtoon_tool_warning()
-            return
-
-        if getattr(main.undo_group, "activeStack", lambda: None)() is None:
-            return
+            return False
 
         current_img = self.viewer.get_image_array(include_patches=False)
         if current_img is None:
-            return
+            return False
 
         mask = self._rasterize_path_to_mask(
             self.current_path,
@@ -204,7 +204,7 @@ class DrawingManager:
             max(1, int(self.brush_size)),
         )
         if mask.size == 0 or not np.any(mask):
-            return
+            return False
 
         edited = current_img.copy()
 
@@ -216,20 +216,22 @@ class DrawingManager:
         elif mode == 'restore':
             original = main.image_ctrl.get_original_image(file_path)
             if original is None:
-                return
+                return False
             if original.shape[:2] != edited.shape[:2]:
                 logger.warning(
                     "Restore skipped due to image size mismatch: original=%s current=%s",
                     original.shape[:2],
                     edited.shape[:2],
                 )
-                return
+                return False
             edited[mask] = original[mask]
         else:
-            return
+            return False
 
-        main.image_ctrl.set_image(edited)
+        has_active_stack = getattr(main.undo_group, "activeStack", lambda: None)() is not None
+        main.image_ctrl.set_image(edited, push=has_active_stack)
         main.mark_project_dirty()
+        return True
 
     def erase_at(self, pos: QPointF):
         erase_path = QPainterPath()
