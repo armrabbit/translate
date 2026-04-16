@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import importlib
 import logging
 import os
+import subprocess
+import sys
 import threading
 from typing import Any
 
@@ -27,8 +30,66 @@ REALESRGAN_MODEL_PATH = os.path.join(
 )
 
 logger = logging.getLogger(__name__)
-_realesrgan_lock = threading.Lock()
+_realesrgan_lock = threading.RLock()
 _realesrgan_upsampler = None
+_deps_install_attempted = False
+_deps_install_error: str | None = None
+
+
+def _is_auto_install_enabled() -> bool:
+    raw = os.getenv("COMICTRANSLATE_AUTO_INSTALL_UPSCALER_DEPS", "1")
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _run_pip_install(args: list[str]) -> None:
+    cmd = [sys.executable, "-m", "pip", "install", *args]
+    logger.info("Installing Real-ESRGAN dependency: %s", " ".join(args))
+    subprocess.check_call(cmd)
+
+
+def _import_realesrgan_dependencies():
+    import torch
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    from realesrgan import RealESRGANer
+    return torch, RRDBNet, RealESRGANer
+
+
+def _auto_install_realesrgan_dependencies() -> None:
+    global _deps_install_attempted, _deps_install_error
+    with _realesrgan_lock:
+        if _deps_install_attempted:
+            if _deps_install_error:
+                raise RuntimeError(_deps_install_error)
+            return
+        _deps_install_attempted = True
+
+    try:
+        try:
+            import torch  # noqa: F401
+        except Exception:
+            try:
+                _run_pip_install(
+                    [
+                        "torch",
+                        "torchvision",
+                        "--index-url",
+                        "https://download.pytorch.org/whl/cpu",
+                    ]
+                )
+            except Exception:
+                _run_pip_install(["torch", "torchvision"])
+
+        _run_pip_install(["realesrgan", "basicsr"])
+        importlib.invalidate_caches()
+        _import_realesrgan_dependencies()
+        _deps_install_error = None
+        logger.info("Real-ESRGAN dependencies installed successfully.")
+    except Exception as exc:
+        _deps_install_error = (
+            "Automatic install for Real-ESRGAN dependencies failed. "
+            "Please install manually: `pip install torch realesrgan basicsr`"
+        )
+        raise RuntimeError(_deps_install_error) from exc
 
 
 def _ensure_uint8(image: np.ndarray) -> np.ndarray:
@@ -90,14 +151,17 @@ def _ensure_realesrgan_model() -> str:
 
 def _build_realesrgan_upsampler():
     try:
-        import torch
-        from basicsr.archs.rrdbnet_arch import RRDBNet
-        from realesrgan import RealESRGANer
+        torch, RRDBNet, RealESRGANer = _import_realesrgan_dependencies()
     except Exception as exc:
-        raise RuntimeError(
-            "Real-ESRGAN dependencies are missing. Please install: "
-            "`pip install torch realesrgan basicsr`"
-        ) from exc
+        if _is_auto_install_enabled():
+            logger.info("Real-ESRGAN dependencies missing, attempting automatic install.")
+            _auto_install_realesrgan_dependencies()
+            torch, RRDBNet, RealESRGANer = _import_realesrgan_dependencies()
+        else:
+            raise RuntimeError(
+                "Real-ESRGAN dependencies are missing. Please install: "
+                "`pip install torch realesrgan basicsr`"
+            ) from exc
 
     model_path = _ensure_realesrgan_model()
     device = "cuda" if torch.cuda.is_available() else "cpu"

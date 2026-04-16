@@ -2,6 +2,11 @@
 
 All notable changes are tracked here.
 
+## v2.8.5
+- Add automatic dependency install for AI upscaler (`torch`, `realesrgan`, `basicsr`) on first use.
+- Add env switch `COMICTRANSLATE_AUTO_INSTALL_UPSCALER_DEPS=0` to disable auto-install.
+- Fix potential lock deadlock during first Real-ESRGAN model download initialization.
+
 ## v2.8.4
 - Make editor `Image Upscaler` fallback automatically to Lanczos when Real-ESRGAN dependencies are missing.
 - Prevent hard error popups when `torch/realesrgan/basicsr` are not installed.
