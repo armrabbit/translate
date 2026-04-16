@@ -137,7 +137,7 @@ class DrawingManager:
         self.viewer.drawing_path = None
 
     def _active_file_path(self):
-        main = self.viewer.parent()
+        main = self._resolve_main_window()
         if main is None:
             return None, None
         curr_idx = getattr(main, "curr_img_idx", -1)
@@ -145,6 +145,33 @@ class DrawingManager:
         if not (0 <= curr_idx < len(image_files)):
             return main, None
         return main, image_files[curr_idx]
+
+    def _resolve_main_window(self):
+        """
+        Resolve the top-level app controller (ComicTranslate).
+
+        ImageViewer can be reparented into stacked widgets/layouts after init,
+        so relying on `viewer.parent()` is unreliable for tool actions.
+        """
+        host = self.viewer.window()
+        if (
+            host is not None
+            and hasattr(host, "curr_img_idx")
+            and hasattr(host, "image_files")
+            and hasattr(host, "image_ctrl")
+        ):
+            return host
+
+        host = self.viewer.parent()
+        while host is not None:
+            if (
+                hasattr(host, "curr_img_idx")
+                and hasattr(host, "image_files")
+                and hasattr(host, "image_ctrl")
+            ):
+                return host
+            host = host.parent()
+        return None
 
     def _show_webtoon_tool_warning(self):
         if self._webtoon_direct_edit_warned:
