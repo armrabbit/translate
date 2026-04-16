@@ -62,7 +62,15 @@ def _try_forward_to_existing_instance(server_name: str, project_file: str | None
     socket.flush()
     socket.waitForBytesWritten(500)
     socket.disconnectFromServer()
-    socket.waitForDisconnected(200)
+    # Avoid Qt warning:
+    # "QLocalSocket::waitForDisconnected() is not allowed in UnconnectedState"
+    unconnected_state = getattr(
+        QLocalSocket,
+        "UnconnectedState",
+        QLocalSocket.LocalSocketState.UnconnectedState,
+    )
+    if socket.state() != unconnected_state:
+        socket.waitForDisconnected(200)
     return True
 
 
