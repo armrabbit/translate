@@ -32,6 +32,7 @@ From current settings UI:
 - Optional:
   - NVIDIA GPU: `onnxruntime-gpu`
   - Archive tools for some comic formats (`.cbr`): `WinRAR` or `7-Zip` in `PATH`
+  - AI upscaler (Real-ESRGAN): `pip install torch realesrgan basicsr`
 
 ## Installation (From Source)
 1. Clone repo

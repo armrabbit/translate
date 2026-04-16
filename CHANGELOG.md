@@ -2,6 +2,11 @@
 
 All notable changes are tracked here.
 
+## v2.8.3
+- Switch image upscaler to AI Real-ESRGAN (anime model) with automatic model download.
+- Keep Lanczos as fallback in export/batch flows when AI dependencies are unavailable.
+- Add dedicated `Image Upscaler` button in editor that requires AI backend.
+
 ## v2.8.2
 - Fix paint/restore stroke disappearing after mouse release.
 - Commit: `0938c91`
