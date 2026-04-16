@@ -54,22 +54,19 @@ def set_texts_from_json(blk_list: list[TextBlock], json_string: str):
         logger.error("Translation response is not a string: %s", type(json_string).__name__)
         return
 
-    match = re.search(r"\{[\s\S]*\}", json_string)
-    if not match:
-        logger.error("No JSON object found in translation response. Preview: %r", json_string[:1000])
-        return
-
-    # Extract JSON object from LLM output that may include extra prose.
-    json_payload = match.group(0)
-    translation_dict = _parse_translation_dict(json_payload, json_string)
+    json_payload = _extract_json_payload(json_string)
+    translation_dict = _parse_translation_dict(json_payload, json_string) if json_payload else None
     if translation_dict is None:
-        translation_dict = _extract_block_pairs(json_payload)
+        # Fall back to pair extraction from raw text (works even when the
+        # JSON object is truncated and missing the closing brace).
+        translation_dict = _extract_block_pairs(json_string)
         if translation_dict:
             logger.warning(
                 "Recovered %s translation pairs from malformed JSON response.",
                 len(translation_dict),
             )
         else:
+            logger.error("No recoverable translation JSON found. Preview: %r", json_string[:1000])
             return
 
     if not isinstance(translation_dict, dict):
@@ -79,17 +76,22 @@ def set_texts_from_json(blk_list: list[TextBlock], json_string: str):
     for idx, blk in enumerate(blk_list):
         block_key = f"block_{idx}"
         if block_key in translation_dict:
-            blk.translation = translation_dict[block_key]
+            value = translation_dict[block_key]
+            blk.translation = value if isinstance(value, str) else str(value)
         else:
             logger.warning("Missing key in translation JSON: %s", block_key)
 
 
 def _parse_translation_dict(json_payload: str, raw_response: str) -> dict | None:
+    if not json_payload:
+        return None
+
     decode_error: json.JSONDecodeError | None = None
 
     attempts: list[str] = [json_payload]
     attempts.append(re.sub(r",\s*([}\]])", r"\1", json_payload))
     attempts.append(re.sub(r"([{,]\s*)(block_\d+)(\s*:)", r'\1"\2"\3', attempts[-1]))
+    attempts.append(_close_truncated_json_object(attempts[-1]))
 
     for candidate in attempts:
         try:
@@ -132,10 +134,90 @@ def _extract_block_pairs(json_payload: str) -> dict[str, str]:
 
     for match in pair_pattern.finditer(json_payload):
         block_key = match.group(1)
-        value = match.group(3) if match.group(3) is not None else match.group(4)
+        quoted_value = match.group(2)
+        try:
+            value = json.loads(quoted_value)
+        except Exception:
+            value = match.group(3) if match.group(3) is not None else match.group(4)
         recovered[block_key] = value
 
     return recovered
+
+
+def _extract_json_payload(raw_response: str) -> str | None:
+    if not raw_response:
+        return None
+
+    start = raw_response.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+
+    for idx in range(start, len(raw_response)):
+        ch = raw_response[idx]
+
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return raw_response[start: idx + 1]
+
+    # Truncated object: keep from first "{" onward and attempt to repair.
+    return _close_truncated_json_object(raw_response[start:])
+
+
+def _close_truncated_json_object(candidate: str) -> str:
+    if not candidate:
+        return candidate
+
+    text = candidate.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+    if text.endswith("```"):
+        text = text.rsplit("```", 1)[0]
+    text = text.rstrip()
+
+    depth = 0
+    in_string = False
+    escaped = False
+
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth = max(0, depth - 1)
+
+    if depth > 0:
+        text = re.sub(r",\s*$", "", text)
+        text += "}" * depth
+
+    return text
 
 def set_upper_case(blk_list: list[TextBlock], upper_case: bool):
     for blk in blk_list:

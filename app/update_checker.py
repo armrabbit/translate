@@ -154,7 +154,21 @@ class UpdateWorker(QObject):
     def run(self):
         try:
             url = f"https://api.github.com/repos/{self.owner}/{self.repo}/releases/latest"
-            response = requests.get(url, timeout=10)
+            response = requests.get(
+                url,
+                timeout=10,
+                headers={"Accept": "application/vnd.github+json"},
+            )
+            if response.status_code == 404:
+                # Repo may not publish GitHub Releases (only commits/tags).
+                # Treat as "no update metadata" instead of surfacing an error popup/log.
+                logger.info(
+                    "No GitHub release metadata for %s/%s; skipping release-based update check.",
+                    self.owner,
+                    self.repo,
+                )
+                self.up_to_date.emit()
+                return
             response.raise_for_status()
             data = response.json()
             

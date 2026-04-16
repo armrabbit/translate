@@ -36,7 +36,7 @@ class SegmentationHandler:
             self.main_page, self.pipeline, mappings, single_block=False
         )
         if not visible_blocks:
-            logger.info("No blocks found in visible area for segmentation")
+            logger.debug("No blocks found in visible area for segmentation")
             return
         
         # Perform segmentation on the visible image with filtered blocks
@@ -77,6 +77,6 @@ class SegmentationHandler:
         for blk, _ in results:
             final_results.append((blk, blk.inpaint_bboxes))
         
-        logger.info(f"Segmentation completed for {len(visible_blocks)} blocks in visible area")
+        logger.debug("Segmentation completed for %d blocks in visible area", len(visible_blocks))
         
         return final_results

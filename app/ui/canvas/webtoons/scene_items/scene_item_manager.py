@@ -6,12 +6,15 @@ Refactored to delegate to specialized managers and reference live data from othe
 """
 
 from collections import defaultdict
+import logging
 from PySide6.QtGui import QTextDocument
 from .rectangle_manager import RectangleManager
 from .text_item_manager import TextItemManager
 from .brush_stroke_manager import BrushStrokeManager
 from .text_block_manager import TextBlockManager
 from .patch_manager import PatchManager
+
+logger = logging.getLogger(__name__)
 
 
 class SceneItemManager:
@@ -76,7 +79,7 @@ class SceneItemManager:
     
     def unload_page_scene_items(self, page_idx: int):
         """Unload scene items for a specific page (saving state if needed)."""
-        print(f"Unloading scene items for page {page_idx}")
+        logger.debug("Unloading scene items for page %s", page_idx)
         
         if not self.main_controller or page_idx >= len(self.image_loader.image_file_paths):
             return

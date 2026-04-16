@@ -253,18 +253,25 @@ def pyside_word_wrap(
 
     def wrap_and_size(font_size):
         words = text.split()
+        if not words:
+            w, h = eval_metrics("", font_size, vertical)
+            return "", w, h
+
         lines = []
-        # build lines greedily
-        while words:
-            line = words.pop(0)
-            # try extending the current line
-            while words:
-                test = f"{line} {words[0]}"
+        idx = 0
+        words_len = len(words)
+
+        # Build lines greedily using index arithmetic to avoid O(n^2) pop(0).
+        while idx < words_len:
+            line = words[idx]
+            idx += 1
+            while idx < words_len:
+                test = f"{line} {words[idx]}"
                 w, h = eval_metrics(test, font_size, vertical)
                 side, side_roi = (h, roi_height) if vertical else (w, roi_width)
                 if side <= side_roi:
                     line = test
-                    words.pop(0)
+                    idx += 1
                 else:
                     break
             lines.append(line)

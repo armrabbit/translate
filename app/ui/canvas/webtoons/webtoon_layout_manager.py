@@ -6,8 +6,11 @@ This class is the single source of truth for layout information.
 """
 
 from bisect import bisect_left, bisect_right
+import logging
 from typing import Set, Tuple
 from PySide6.QtCore import QPointF, QRectF, QTimer
+
+logger = logging.getLogger(__name__)
 
 
 class WebtoonLayoutManager:
@@ -91,7 +94,7 @@ class WebtoonLayoutManager:
             return True
             
         except Exception as e:
-            print(f"Error estimating layout: {e}")
+            logger.warning("Error estimating layout: %s", e)
             return False
     
     def adjust_layout_for_actual_size(self, page_idx: int, actual_height: int):
@@ -174,7 +177,11 @@ class WebtoonLayoutManager:
     def scroll_to_page(self, page_index: int, position: str = 'top'):
         """Scroll to a specific page."""
         if not (0 <= page_index < len(self.image_positions)):
-            print(f"WebtoonLayoutManager: Invalid page index {page_index}, total pages: {len(self.image_positions)}")
+            logger.debug(
+                "WebtoonLayoutManager: Invalid page index %s, total pages: %s",
+                page_index,
+                len(self.image_positions),
+            )
             return False
             
         # Calculate target position
@@ -187,8 +194,17 @@ class WebtoonLayoutManager:
         elif position == 'bottom':
             target_y += page_height
             
-        print(f"WebtoonLayoutManager: Scrolling to page {page_index}, position {position}")
-        print(f"  Page Y: {page_y}, Height: {page_height}, Target Y: {target_y}")
+        logger.debug(
+            "WebtoonLayoutManager: Scrolling to page %s, position %s",
+            page_index,
+            position,
+        )
+        logger.debug(
+            "Page Y: %s, Height: %s, Target Y: %s",
+            page_y,
+            page_height,
+            target_y,
+        )
         
         # Update current page index before scrolling
         old_page = self.current_page_index
@@ -199,7 +215,11 @@ class WebtoonLayoutManager:
         
         # Check viewport after scroll
         viewport_center = self.viewer.mapToScene(self.viewer.viewport().rect().center())
-        print(f"  After scroll: viewport center is at {viewport_center.x()}, {viewport_center.y()}")
+        logger.debug(
+            "After scroll: viewport center is at %s, %s",
+            viewport_center.x(),
+            viewport_center.y(),
+        )
         
         # Enable page detection after scrolling
         self.viewer.event_handler._enable_page_detection_after_delay()
@@ -235,7 +255,10 @@ class WebtoonLayoutManager:
 
     def ensure_current_page_visible(self, image_items: dict):
         """Ensure the current page is visible and view is properly set up."""
-        print(f"WebtoonLayoutManager: ensure_current_page_visible: current_page_index = {self.current_page_index}")
+        logger.debug(
+            "WebtoonLayoutManager: ensure_current_page_visible: current_page_index = %s",
+            self.current_page_index,
+        )
         
         if self.current_page_index in image_items:
             self.viewer.fitInView()
@@ -244,12 +267,12 @@ class WebtoonLayoutManager:
             viewport_center = self.viewer.mapToScene(self.viewer.viewport().rect().center()).y()
             current_page_center = self.image_positions[self.current_page_index] + (self.image_heights[self.current_page_index] / 2)
             
-            print(f"Viewport center: {viewport_center}, Page center: {current_page_center}")
+            logger.debug("Viewport center: %s, Page center: %s", viewport_center, current_page_center)
             
             # If viewport is far from current page, scroll to it
             distance = abs(viewport_center - current_page_center)
             threshold = self.image_heights[self.current_page_index] / 4
-            print(f"Distance: {distance}, Threshold: {threshold}")
+            logger.debug("Distance: %s, Threshold: %s", distance, threshold)
             
             if distance > threshold:
                 self.scroll_to_page(self.current_page_index, 'center')

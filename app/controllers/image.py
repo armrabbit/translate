@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import imkit as imk
 import numpy as np
 from typing import TYPE_CHECKING, List
@@ -19,6 +20,8 @@ from app.controllers.psd_importer import ImportedPsdPage, import_psd_files, prep
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
+
+logger = logging.getLogger(__name__)
 
 
 class ImageStateController:
@@ -678,7 +681,7 @@ class ImageStateController:
         if self.main.webtoon_mode:
             # In webtoon mode, just scroll to the page using the unified image viewer
             if self.main.image_viewer.hasPhoto():
-                print(f"Card selected: scrolling to page {index}")
+                logger.debug("Card selected: scrolling to page %s", index)
                 
                 # Set the current index immediately to avoid confusion
                 self.main.curr_img_idx = index

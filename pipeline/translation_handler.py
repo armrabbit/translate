@@ -130,7 +130,7 @@ class TranslationHandler:
             self.main_page, self.pipeline, mappings, single_block
         )
         if not visible_blocks:
-            logger.info("No blocks found in visible area")
+            logger.debug("No blocks found in visible area")
             return
         
         # Perform translation on the visible image with filtered blocks
@@ -147,4 +147,4 @@ class TranslationHandler:
         # Apply upper case if needed
         set_upper_case(visible_blocks, upper_case)
         
-        logger.info(f"Translation completed for {len(visible_blocks)} blocks in visible area")
+        logger.debug("Translation completed for %d blocks in visible area", len(visible_blocks))

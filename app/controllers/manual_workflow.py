@@ -64,7 +64,14 @@ class ManualWorkflowController:
             manager = getattr(self.main.image_viewer, "webtoon_manager", None)
             scene_mgr = getattr(manager, "scene_item_manager", None) if manager is not None else None
             if scene_mgr is not None:
-                scene_mgr.save_all_scene_items_to_states()
+                # Persist only loaded pages for batch operations.
+                # Full redistribution across all pages is significantly heavier and
+                # is only needed for structural operations like mode switches.
+                save_loaded = getattr(scene_mgr, "save_loaded_scene_items_to_states", None)
+                if callable(save_loaded):
+                    save_loaded()
+                else:
+                    scene_mgr.save_all_scene_items_to_states()
                 if (
                     current_file in selected_paths
                     and 0 <= current_page_idx < len(self.main.image_files)
@@ -344,6 +351,7 @@ class ManualWorkflowController:
                 ocr = OCRProcessor()
                 ocr_model = self.main.settings_page.get_tool_selection("ocr")
                 device = resolve_device(self.main.settings_page.is_gpu_enabled())
+                initialized_source_lang: str | None = None
                 results: dict[str, list[TextBlock]] = {}
                 for file_path in selected_paths:
                     state = self.main.image_states.get(file_path, {})
@@ -358,7 +366,9 @@ class ManualWorkflowController:
                     if cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
                         cache_manager._apply_cached_ocr_to_blocks(cache_key, blk_list)
                     else:
-                        ocr.initialize(self.main, source_lang)
+                        if source_lang != initialized_source_lang:
+                            ocr.initialize(self.main, source_lang)
+                            initialized_source_lang = source_lang
                         ocr.process(image, blk_list)
                         cache_manager._cache_ocr_results(cache_key, blk_list)
                     results[file_path] = blk_list
@@ -444,6 +454,7 @@ class ManualWorkflowController:
             def translate_selected_pages() -> dict[str, list[TextBlock]]:
                 cache_manager = self.main.pipeline.cache_manager
                 results: dict[str, list[TextBlock]] = {}
+                translator_cache: dict[tuple[str, str], Translator] = {}
                 for file_path in selected_paths:
                     state = self.main.image_states.get(file_path, {})
                     blk_list = state.get("blk_list", [])
@@ -454,7 +465,6 @@ class ManualWorkflowController:
                         continue
                     source_lang = state.get("source_lang", source_lang_fallback)
                     target_lang = state.get("target_lang", target_lang_fallback)
-                    translator = Translator(self.main, source_lang, target_lang)
                     cache_key = cache_manager._get_translation_cache_key(
                         image,
                         source_lang,
@@ -465,6 +475,11 @@ class ManualWorkflowController:
                     if cache_manager._can_serve_all_blocks_from_translation_cache(cache_key, blk_list):
                         cache_manager._apply_cached_translations_to_blocks(cache_key, blk_list)
                     else:
+                        lang_pair = (source_lang, target_lang)
+                        translator = translator_cache.get(lang_pair)
+                        if translator is None:
+                            translator = Translator(self.main, source_lang, target_lang)
+                            translator_cache[lang_pair] = translator
                         translator.translate(blk_list, image, extra_context)
                         cache_manager._cache_translation_results(cache_key, blk_list)
                     set_upper_case(blk_list, upper_case)
@@ -527,18 +542,6 @@ class ManualWorkflowController:
         )
 
     def update_translated_text_items(self, single_blk: bool, finished_callback: Callable[[], None] | None = None) -> None:
-        
-        def set_new_text(
-            text_item: TextBlockItem, 
-            wrapped: str, 
-            font_size: int
-        ) -> None:
-            
-            if is_no_space_lang(trg_lng_cd):
-                wrapped = wrapped.replace(" ", "")
-            text_item.set_plain_text(wrapped)
-            text_item.set_font_size(font_size)
-
         text_items_to_process = self._get_visible_text_items()
         if not text_items_to_process:
             self.finish_ocr_translate(single_blk, finished_callback)
@@ -549,54 +552,138 @@ class ManualWorkflowController:
         target_lang_en = self.main.lang_mapping.get(self.main.t_combo.currentText(), None)
         trg_lng_cd = get_language_code(target_lang_en)
 
-        def on_format_finished() -> None:
-            for text_item in text_items_to_process:
-                text_item.handleDeselection()
-                x1, y1 = int(text_item.pos().x()), int(text_item.pos().y())
-                rot = text_item.rotation()
+        def build_block_lookup(blk_list: list[TextBlock]) -> dict[tuple[int, int], list[TextBlock]]:
+            bucket_size = 8
+            buckets: dict[tuple[int, int], list[TextBlock]] = {}
+            for blk in blk_list:
+                x1, y1 = int(blk.xyxy[0]), int(blk.xyxy[1])
+                key = (x1 // bucket_size, y1 // bucket_size)
+                buckets.setdefault(key, []).append(blk)
+            return buckets
 
-                blk = next(
-                    (
-                        b
-                        for b in self.main.blk_list
-                        if is_close(b.xyxy[0], x1, 5)
-                        and is_close(b.xyxy[1], y1, 5)
-                        and is_close(b.angle, rot, 1)
-                    ),
-                    None,
-                )
+        def find_matching_block(
+            block_lookup: dict[tuple[int, int], list[TextBlock]],
+            x1: int,
+            y1: int,
+            rotation: float,
+        ) -> TextBlock | None:
+            bucket_size = 8
+            bx, by = x1 // bucket_size, y1 // bucket_size
+            best_match: TextBlock | None = None
+            best_score = float("inf")
+
+            for ox in (-1, 0, 1):
+                for oy in (-1, 0, 1):
+                    for blk in block_lookup.get((bx + ox, by + oy), []):
+                        if (
+                            not is_close(blk.xyxy[0], x1, 5)
+                            or not is_close(blk.xyxy[1], y1, 5)
+                            or not is_close(blk.angle, rotation, 1)
+                        ):
+                            continue
+                        score = abs(float(blk.xyxy[0]) - x1) + abs(float(blk.xyxy[1]) - y1) + abs(float(blk.angle) - rotation)
+                        if score < best_score:
+                            best_score = score
+                            best_match = blk
+
+            return best_match
+
+        def build_wrap_jobs() -> list[tuple]:
+            jobs: list[tuple] = []
+            block_lookup = build_block_lookup(self.main.blk_list)
+
+            for idx, text_item in enumerate(text_items_to_process):
+                x1, y1 = int(text_item.pos().x()), int(text_item.pos().y())
+                rot = float(text_item.rotation())
+                blk = find_matching_block(block_lookup, x1, y1, rot)
                 if not (blk and blk.translation):
                     continue
 
                 vertical = is_vertical_block(blk, trg_lng_cd)
-                wrap_args = (
-                    blk.translation,
-                    text_item.font_family,
-                    blk.xyxy[2] - blk.xyxy[0],
-                    blk.xyxy[3] - blk.xyxy[1],
-                    float(text_item.line_spacing),
-                    float(text_item.outline_width),
-                    text_item.bold,
-                    text_item.italic,
-                    text_item.underline,
-                    text_item.alignment,
-                    text_item.direction,
-                    rs.max_font_size,
-                    rs.min_font_size,
+                jobs.append(
+                    (
+                        idx,
+                        blk.translation,
+                        text_item.font_family,
+                        blk.xyxy[2] - blk.xyxy[0],
+                        blk.xyxy[3] - blk.xyxy[1],
+                        float(text_item.line_spacing),
+                        float(text_item.outline_width),
+                        text_item.bold,
+                        text_item.italic,
+                        text_item.underline,
+                        text_item.alignment,
+                        text_item.direction,
+                        rs.max_font_size,
+                        rs.min_font_size,
+                        vertical,
+                    )
+                )
+            return jobs
+
+        def compute_wrapped_texts(jobs: list[tuple]) -> list[tuple[int, str, int]]:
+            wrapped_results: list[tuple[int, str, int]] = []
+            no_space_lang = is_no_space_lang(trg_lng_cd)
+            for (
+                idx,
+                text,
+                font_family,
+                width,
+                height,
+                line_spacing,
+                outline_width,
+                bold,
+                italic,
+                underline,
+                alignment,
+                direction,
+                max_font_size,
+                min_font_size,
+                vertical,
+            ) in jobs:
+                wrapped, font_size = pyside_word_wrap(
+                    text,
+                    font_family,
+                    width,
+                    height,
+                    line_spacing,
+                    outline_width,
+                    bold,
+                    italic,
+                    underline,
+                    alignment,
+                    direction,
+                    max_font_size,
+                    min_font_size,
                     vertical,
                 )
+                if no_space_lang:
+                    wrapped = wrapped.replace(" ", "")
+                wrapped_results.append((idx, wrapped, font_size))
+            return wrapped_results
 
-                self.main.run_threaded(
-                    pyside_word_wrap,
-                    lambda wrap_res, ti=text_item: set_new_text(
-                        ti, wrap_res[0], wrap_res[1]
-                    ),
-                    self.main.default_error_handler,
-                    None,
-                    *wrap_args,
+        def apply_wrapped_texts(results: list[tuple[int, str, int]]) -> None:
+            for text_item in text_items_to_process:
+                text_item.handleDeselection()
+            for idx, wrapped, font_size in results:
+                text_item = text_items_to_process[idx]
+                text_item.set_plain_text(wrapped)
+                text_item.set_font_size(font_size)
+
+        def on_format_finished() -> None:
+            wrap_jobs = build_wrap_jobs()
+            if not wrap_jobs:
+                self.main.run_finish_only(
+                    finished_callback=lambda: self._finish_and_continue(finished_callback)
                 )
+                return
 
-            self.main.run_finish_only(finished_callback=lambda: self._finish_and_continue(finished_callback))
+            self.main.run_threaded(
+                lambda: compute_wrapped_texts(wrap_jobs),
+                apply_wrapped_texts,
+                self.main.default_error_handler,
+                lambda: self._finish_and_continue(finished_callback),
+            )
 
         self.main.run_threaded(
             lambda: format_translations(self.main.blk_list, trg_lng_cd, upper_case=upper),

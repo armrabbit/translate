@@ -170,7 +170,7 @@ class CacheManager:
             # Do not create a cache entry if there are no blocks with OCR text
             if block_results:
                 self.ocr_cache[cache_key] = block_results
-                logger.info(f"Cached OCR results for {len(block_results)} blocks")
+                logger.debug("Cached OCR results for %d blocks", len(block_results))
             else:
                 logger.debug("No OCR text found in blocks; skipping OCR cache creation")
         except Exception as e:
@@ -253,7 +253,7 @@ class CacheManager:
             # Do not create a translation cache entry if no translations were present
             if block_results:
                 self.translation_cache[cache_key] = block_results
-                logger.info(f"Cached translation results for {len(block_results)} blocks")
+                logger.debug("Cached translation results for %d blocks", len(block_results))
             else:
                 logger.debug("No translations found in blocks; skipping translation cache creation")
         except Exception as e:

@@ -1,4 +1,5 @@
 from collections import deque
+import logging
 import numpy as np
 from typing import Set, Optional
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsRectItem
@@ -6,6 +7,8 @@ from PySide6.QtCore import QTimer, QRectF, Qt
 from PySide6.QtGui import QPixmap, QColor, QPen, QBrush, QImage, QPainter
 import imkit as imk
 from app.path_materialization import ensure_path_materialized
+
+logger = logging.getLogger(__name__)
 
 
 class LazyImageLoader:
@@ -314,8 +317,7 @@ class LazyImageLoader:
 
         self._ensure_placeholder(page_idx)
         self.loaded_pages.remove(page_idx)
-            
-        print(f"Unloaded page {page_idx + 1}")
+        logger.debug("Unloaded page %s", page_idx + 1)
     
     def set_timer_interval(self, interval: int):
         """Set the load timer interval."""

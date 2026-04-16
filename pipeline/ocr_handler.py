@@ -109,7 +109,7 @@ class OCRHandler:
             self.main_page, self.pipeline, mappings, single_block
         )
         if not visible_blocks:
-            logger.info("No blocks found in visible area")
+            logger.debug("No blocks found in visible area")
             return
         
         # Perform OCR on the visible image with filtered blocks
@@ -119,4 +119,4 @@ class OCRHandler:
         # The OCR text is already set on the blocks, just restore coordinates
         restore_original_block_coordinates(visible_blocks)
         
-        logger.info(f"OCR completed for {len(visible_blocks)} blocks in visible area")
+        logger.debug("OCR completed for %d blocks in visible area", len(visible_blocks))
