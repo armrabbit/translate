@@ -311,6 +311,80 @@ class ImageStateController:
 
         return None
 
+    def get_restore_base_image(self, file_path: str) -> np.ndarray | None:
+        """
+        Build the restore baseline for direct paint/restore tools.
+
+        Baseline = original page + persisted inpaint patches (if any).
+        This prevents restore from reverting the page to a pre-clean state.
+        """
+        base = self.get_original_image(file_path)
+        if base is None:
+            return None
+
+        patches = self.main.image_patches.get(file_path, [])
+        if not patches:
+            return base
+
+        composed = base.copy()
+        mem_map = {
+            p.get("hash"): p.get("image")
+            for p in self.main.in_memory_patches.get(file_path, [])
+            if isinstance(p, dict) and p.get("hash") is not None
+        }
+
+        img_h, img_w = composed.shape[:2]
+        for patch in patches:
+            if not isinstance(patch, dict):
+                continue
+            bbox = patch.get("bbox")
+            if not bbox or len(bbox) != 4:
+                continue
+
+            try:
+                x, y, w, h = [int(round(v)) for v in bbox]
+            except Exception:
+                continue
+            if w <= 0 or h <= 0:
+                continue
+
+            patch_img = mem_map.get(patch.get("hash"))
+            if patch_img is None:
+                patch_path = patch.get("png_path")
+                if not patch_path:
+                    continue
+                try:
+                    ensure_path_materialized(patch_path)
+                except Exception:
+                    pass
+                patch_img = imk.read_image(patch_path)
+            if patch_img is None:
+                continue
+            if patch_img.ndim != 3:
+                continue
+
+            src_h, src_w = patch_img.shape[:2]
+            draw_w = min(w, src_w)
+            draw_h = min(h, src_h)
+            if draw_w <= 0 or draw_h <= 0:
+                continue
+
+            dst_x1 = max(0, x)
+            dst_y1 = max(0, y)
+            dst_x2 = min(img_w, x + draw_w)
+            dst_y2 = min(img_h, y + draw_h)
+            if dst_x2 <= dst_x1 or dst_y2 <= dst_y1:
+                continue
+
+            src_x1 = max(0, -x)
+            src_y1 = max(0, -y)
+            src_x2 = src_x1 + (dst_x2 - dst_x1)
+            src_y2 = src_y1 + (dst_y2 - dst_y1)
+
+            composed[dst_y1:dst_y2, dst_x1:dst_x2] = patch_img[src_y1:src_y2, src_x1:src_x2, :3]
+
+        return composed
+
 
     def clear_state(self):
         # Clear existing image data

@@ -220,7 +220,10 @@ class DrawingManager:
             self._show_webtoon_tool_warning()
             return False
 
-        current_img = self.viewer.get_image_array(include_patches=False)
+        # Keep current "cleaned" visual state as baseline.
+        # Using include_patches=False would drop inpaint patches and make the
+        # image appear to revert after paint/restore.
+        current_img = self.viewer.get_image_array(include_patches=True)
         if current_img is None:
             return False
 
@@ -241,17 +244,17 @@ class DrawingManager:
                 dtype=np.uint8,
             )
         elif mode == 'restore':
-            original = main.image_ctrl.get_original_image(file_path)
-            if original is None:
+            restore_base = main.image_ctrl.get_restore_base_image(file_path)
+            if restore_base is None:
                 return False
-            if original.shape[:2] != edited.shape[:2]:
+            if restore_base.shape[:2] != edited.shape[:2]:
                 logger.warning(
-                    "Restore skipped due to image size mismatch: original=%s current=%s",
-                    original.shape[:2],
+                    "Restore skipped due to image size mismatch: restore_base=%s current=%s",
+                    restore_base.shape[:2],
                     edited.shape[:2],
                 )
                 return False
-            edited[mask] = original[mask]
+            edited[mask] = restore_base[mask]
         else:
             return False
 
