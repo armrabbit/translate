@@ -202,6 +202,7 @@ class ComicTranslate(ComicTranslateUI):
         self.translate_button.clicked.connect(self.start_batch_process)
         self.cancel_button.clicked.connect(self.cancel_current_task)
         self.batch_report_button.clicked.connect(self.show_latest_batch_report)
+        self.image_upscale_button.clicked.connect(self.image_ctrl.upscale_current_image)
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)

@@ -17,6 +17,7 @@ from modules.utils.image_utils import get_smart_text_color
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.textblock import TextBlock
 from modules.utils.translator_utils import format_translations, get_raw_text, get_raw_translation
+from modules.utils.upscaler import get_upscale_factor_from_export_settings, upscale_image
 
 if TYPE_CHECKING:
     from .processor import WebtoonBatchProcessor
@@ -240,6 +241,8 @@ class RenderMixin:
             if not os.path.exists(path):
                 os.makedirs(path, exist_ok=True)
             cleaned_image_rgb = renderer.render_to_image()
+            upscale_factor = get_upscale_factor_from_export_settings(export_settings)
+            cleaned_image_rgb = upscale_image(cleaned_image_rgb, upscale_factor)
             imk.write_image(
                 os.path.join(path, f"{base_name}_cleaned{extension}"), cleaned_image_rgb
             )

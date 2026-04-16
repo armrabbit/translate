@@ -51,6 +51,12 @@ class WorkspaceMixin:
         for button in self.hbutton_group.get_button_group().buttons():
             button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
+        self.image_upscale_button = MPushButton(self.tr("Image Upscaler"))
+        self.image_upscale_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.image_upscale_button.setToolTip(
+            self.tr("Upscale the current page image before detection/recognition.")
+        )
+
         self.progress_bar = MProgressBar().auto_color()
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
@@ -85,6 +91,7 @@ class WorkspaceMixin:
         self.batch_report_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
         header_layout.addWidget(self.hbutton_group)
+        header_layout.addWidget(self.image_upscale_button)
         header_layout.addWidget(self.loading)
         header_layout.addStretch()
         header_layout.addWidget(self.webtoon_toggle)

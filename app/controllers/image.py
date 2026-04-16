@@ -17,6 +17,7 @@ from app.ui.list_view_image_loader import ListViewImageLoader
 from app.thread_worker import GenericWorker
 from app.path_materialization import ensure_path_materialized
 from app.controllers.psd_importer import ImportedPsdPage, import_psd_files, prepare_psd_font_catalog
+from modules.utils.upscaler import upscale_image
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -384,6 +385,123 @@ class ImageStateController:
             composed[dst_y1:dst_y2, dst_x1:dst_x2] = patch_img[src_y1:src_y2, src_x1:src_x2, :3]
 
         return composed
+
+    def _page_has_processing_state(self, file_path: str) -> bool:
+        state = self.main.image_states.get(file_path, {}) or {}
+        viewer_state = state.get("viewer_state", {}) or {}
+        return bool(
+            state.get("blk_list")
+            or state.get("brush_strokes")
+            or viewer_state.get("rectangles")
+            or viewer_state.get("text_items_state")
+            or self.main.image_patches.get(file_path)
+        )
+
+    def _reset_page_state_for_upscale(self, file_path: str) -> None:
+        state = self.main.image_states.setdefault(file_path, {})
+        state["viewer_state"] = {}
+        state["brush_strokes"] = []
+        state["blk_list"] = []
+
+        self.main.image_patches[file_path] = []
+        self.main.in_memory_patches[file_path] = []
+
+        if self._current_file_path() == file_path:
+            viewer = self.main.image_viewer
+            viewer.clear_rectangles(page_switch=True)
+            viewer.clear_text_items()
+            viewer.clear_brush_strokes(page_switch=True)
+            self.main.curr_tblock_item = None
+            self.main.curr_tblock = None
+            self.main.blk_list = []
+            self.main.text_ctrl.clear_text_edits()
+
+    def upscale_current_image(self) -> None:
+        if not self.main.image_files or not (0 <= self.main.curr_img_idx < len(self.main.image_files)):
+            MMessage.info(
+                text=self.main.tr("Please import and select an image first."),
+                parent=self.main,
+                duration=4,
+                closable=True,
+            )
+            return
+
+        if self.main.webtoon_mode:
+            MMessage.warning(
+                text=self.main.tr("Image Upscaler is available in normal mode only. Please turn off Webtoon mode first."),
+                parent=self.main,
+                duration=6,
+                closable=True,
+            )
+            return
+
+        file_path = self.main.image_files[self.main.curr_img_idx]
+
+        choices = [self.main.tr("2x"), self.main.tr("4x")]
+        selected, ok = QtWidgets.QInputDialog.getItem(
+            self.main,
+            self.main.tr("Image Upscaler"),
+            self.main.tr("Select upscale factor for current page:"),
+            choices,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        factor = 2 if selected == choices[0] else 4
+
+        if self._page_has_processing_state(file_path):
+            msg = QtWidgets.QMessageBox(self.main)
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setWindowTitle(self.main.tr("Reset Page Data"))
+            msg.setText(
+                self.main.tr(
+                    "Upscaling changes image size and will reset detected boxes, text, clean patches, and brush strokes on this page.\nContinue?"
+                )
+            )
+            yes_btn = msg.addButton(self.main.tr("Continue"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+            no_btn = msg.addButton(self.main.tr("Cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+            msg.setDefaultButton(no_btn)
+            msg.exec()
+            if msg.clickedButton() != yes_btn:
+                return
+
+        self.main.loading.setVisible(True)
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        QtWidgets.QApplication.processEvents()
+
+        try:
+            source_image = self.main.load_image(file_path)
+            if source_image is None or source_image.size == 0:
+                raise ValueError(self.main.tr("Unable to read the current image."))
+
+            upscaled = upscale_image(source_image, factor)
+            self._reset_page_state_for_upscale(file_path)
+            self.set_image(upscaled, push=True)
+            self.save_image_state(file_path)
+            self.main.mark_project_dirty()
+
+        except Exception as exc:
+            logger.exception("Image upscaling failed for '%s': %s", file_path, exc)
+            MMessage.error(
+                text=self.main.tr("Image upscaling failed: {0}").format(str(exc)),
+                parent=self.main,
+                duration=None,
+                closable=True,
+            )
+            return
+
+        finally:
+            self.main.loading.setVisible(False)
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+        MMessage.success(
+            text=self.main.tr("Upscaled current page to {0}x.").format(factor),
+            parent=self.main,
+            duration=4,
+            closable=True,
+        )
 
 
     def clear_state(self):

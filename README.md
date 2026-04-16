@@ -94,25 +94,32 @@ Flow:
 6. Verify
 7. Clean (all pages)
 
-## Update Checker (GitHub Releases)
-The app checks updates from GitHub `releases/latest`.
+## Update Checker (Git-Based)
+The app checks updates from the configured Git remote/branch and updates with:
+- `git fetch`
+- `git pull --ff-only`
+- `python -m pip install -r requirements.txt` (if `requirements.txt` exists)
 
 Default repo:
 - Owner: `armrabbit`
 - Repo: `translate`
 
 You can override with environment variables:
-- `COMICTRANSLATE_UPDATE_REPO_OWNER`
-- `COMICTRANSLATE_UPDATE_REPO_NAME`
+- `COMICTRANSLATE_UPDATE_REPO_URL`
+- `COMICTRANSLATE_UPDATE_REMOTE` (default: `origin`)
+- `COMICTRANSLATE_UPDATE_BRANCH` (default: current branch)
+- `COMICTRANSLATE_UPDATE_WORKDIR` (optional custom repo path)
 
 Example:
 ```powershell
-$env:COMICTRANSLATE_UPDATE_REPO_OWNER="your-owner"
-$env:COMICTRANSLATE_UPDATE_REPO_NAME="your-repo"
+$env:COMICTRANSLATE_UPDATE_REPO_URL="https://github.com/your-owner/your-repo.git"
+$env:COMICTRANSLATE_UPDATE_REMOTE="origin"
+$env:COMICTRANSLATE_UPDATE_BRANCH="main"
 python comic.py
 ```
 
-Important: update detection uses GitHub Releases. A normal `git push` without creating a new Release will not appear as an app update.
+## Version History
+See `CHANGELOG.md` for version numbers and per-change notes.
 
 ## Troubleshooting
 ### `JSONDecodeError` during translation

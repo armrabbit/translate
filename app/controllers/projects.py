@@ -30,6 +30,7 @@ from app.projects.project_state import (
 )
 from modules.utils.archives import make
 from modules.utils.paths import get_user_data_dir, get_default_project_autosave_dir
+from modules.utils.upscaler import get_upscale_factor_from_export_settings
 
 logger = logging.getLogger(__name__)
 
@@ -887,6 +888,8 @@ class ProjectController:
                 logger.info("Export pre-materialized %d paths before save-and-make.", count)
         except Exception:
             logger.debug("Export pre-materialization failed; continuing lazily.", exc_info=True)
+        export_settings = self.main.settings_page.get_export_settings()
+        upscale_factor = get_upscale_factor_from_export_settings(export_settings)
         temp_dir = tempfile.mkdtemp(prefix="comic_translate_export_")
         try:            
             temp_main_page_context = None
@@ -920,7 +923,7 @@ class ProjectController:
                         renderer.add_state_to_image(viewer_state)
 
                     sv_pth = os.path.join(group_dir, self._build_export_page_name(page_number, file_path))
-                    renderer.save_image(sv_pth)
+                    renderer.save_image(sv_pth, upscale_factor=upscale_factor)
 
                 os.makedirs(os.path.dirname(group["output_path"]) or ".", exist_ok=True)
                 make(group_dir, group["output_path"])

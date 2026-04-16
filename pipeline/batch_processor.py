@@ -20,6 +20,7 @@ from modules.utils.pipeline_config import get_config
 from modules.utils.image_utils import generate_mask, get_smart_text_color
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
+from modules.utils.upscaler import get_upscale_factor_from_export_settings, upscale_image
 from modules.rendering.render import get_best_render_area, pyside_word_wrap, is_vertical_block
 from modules.utils.device import resolve_device
 from modules.utils.exceptions import InsufficientCreditsException
@@ -236,7 +237,9 @@ class BatchProcessor:
                 path = os.path.join(directory, f"comic_translate_{timestamp}", "cleaned_images", archive_bname)
                 if not os.path.exists(path):
                     os.makedirs(path, exist_ok=True)
-                imk.write_image(os.path.join(path, f"{base_name}_cleaned{extension}"), inpaint_input_img)
+                upscale_factor = get_upscale_factor_from_export_settings(export_settings)
+                cleaned_image = upscale_image(inpaint_input_img, upscale_factor)
+                imk.write_image(os.path.join(path, f"{base_name}_cleaned{extension}"), cleaned_image)
 
             self.emit_progress(index, total_images, 5, 10, False)
             if self._is_cancelled():

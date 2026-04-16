@@ -2,6 +2,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 import imkit as imk
 import numpy as np
 from app.path_materialization import ensure_path_materialized
+from modules.utils.upscaler import upscale_image
 from .text_item import TextBlockItem
 from .text.text_item_properties import TextItemProperties
 
@@ -229,8 +230,9 @@ class ImageSaveRenderer:
 
         return arr
 
-    def save_image(self, output_path: str):
+    def save_image(self, output_path: str, upscale_factor: int = 1):
         final_rgb = self.render_to_image()
+        final_rgb = upscale_image(final_rgb, upscale_factor)
         imk.write_image(output_path, final_rgb)
 
     def apply_patches(self, patches: list[dict]):
