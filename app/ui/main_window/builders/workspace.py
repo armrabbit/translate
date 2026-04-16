@@ -336,11 +336,33 @@ class WorkspaceMixin:
         self.eraser_button.clicked.connect(self.toggle_eraser_tool)
         self.tool_buttons["eraser"] = self.eraser_button
 
+        self.paint_button = self.create_tool_button(svg="edit_fill.svg", checkable=True)
+        self.paint_button.setToolTip(self.tr("Paint Directly on Current Page"))
+        self.paint_button.clicked.connect(self.toggle_paint_tool)
+        self.tool_buttons["paint"] = self.paint_button
+
+        self.restore_button = self.create_tool_button(svg="refresh_line.svg", checkable=True)
+        self.restore_button.setToolTip(self.tr("Restore from Original Image in Painted Area"))
+        self.restore_button.clicked.connect(self.toggle_restore_tool)
+        self.tool_buttons["restore"] = self.restore_button
+
         self.clear_brush_strokes_button = self.create_tool_button(svg="clear-outlined.svg")
         self.clear_brush_strokes_button.setToolTip(self.tr("Remove all the brush strokes on the Image"))
 
+        self.paint_color_button = QtWidgets.QPushButton()
+        self.paint_color_button.setFixedSize(24, 24)
+        self.paint_color_button.setToolTip(self.tr("Paint Color"))
+        default_paint_color = self.image_viewer.drawing_manager.paint_color.name()
+        self.paint_color_button.setStyleSheet(
+            f"background-color: {default_paint_color}; border: 1px solid #666; border-radius: 5px;"
+        )
+        self.paint_color_button.clicked.connect(self.pick_paint_color)
+
         inp_tools_lay.addWidget(self.brush_button)
         inp_tools_lay.addWidget(self.eraser_button)
+        inp_tools_lay.addWidget(self.paint_button)
+        inp_tools_lay.addWidget(self.restore_button)
+        inp_tools_lay.addWidget(self.paint_color_button)
         inp_tools_lay.addWidget(self.clear_brush_strokes_button)
         inp_tools_lay.addStretch()
 

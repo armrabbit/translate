@@ -152,10 +152,14 @@ class ImageViewer(QGraphicsView):
         self.current_tool = tool
         if tool == 'pan':
             self.setDragMode(QGraphicsView.ScrollHandDrag)
-        elif tool in ['brush', 'eraser']:
+        elif tool in ['brush', 'eraser', 'paint', 'restore']:
             self.setDragMode(QGraphicsView.NoDrag)
             if tool == 'brush':
                 cursor = self.drawing_manager.brush_cursor
+            elif tool == 'paint':
+                cursor = self.drawing_manager.paint_cursor
+            elif tool == 'restore':
+                cursor = self.drawing_manager.restore_cursor
             else:
                 cursor =  self.drawing_manager.eraser_cursor
             self.setCursor(cursor)
@@ -204,6 +208,12 @@ class ImageViewer(QGraphicsView):
         if self.current_tool == 'brush':
             self.drawing_manager.set_brush_size(size, scaled_size)
             self.setCursor(self.drawing_manager.brush_cursor)
+        elif self.current_tool == 'paint':
+            self.drawing_manager.set_brush_size(size, scaled_size)
+            self.setCursor(self.drawing_manager.paint_cursor)
+        elif self.current_tool == 'restore':
+            self.drawing_manager.set_brush_size(size, scaled_size)
+            self.setCursor(self.drawing_manager.restore_cursor)
         elif self.current_tool == 'eraser':
             self.drawing_manager.set_eraser_size(size, scaled_size)
             self.setCursor(self.drawing_manager.eraser_cursor)

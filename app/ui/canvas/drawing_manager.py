@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from typing import List, Dict
 
@@ -11,6 +12,8 @@ from app.ui.commands.brush import BrushStrokeCommand, ClearBrushStrokesCommand, 
 from app.ui.commands.base import PathCommandBase as pcb
 import imkit as imk
 
+logger = logging.getLogger(__name__)
+
 
 class DrawingManager:
     """Manages all drawing-related tools and state."""
@@ -20,17 +23,21 @@ class DrawingManager:
         self._scene = viewer._scene
 
         self.brush_color = QColor(255, 0, 0, 100)
+        self.paint_color = QColor(255, 255, 255)
         self.brush_size = 25
         self.eraser_size = 25
         
         self.brush_cursor = self.create_inpaint_cursor('brush', self.brush_size)
         self.eraser_cursor = self.create_inpaint_cursor('eraser', self.eraser_size)
+        self.paint_cursor = self.create_inpaint_cursor('paint', self.brush_size)
+        self.restore_cursor = self.create_inpaint_cursor('restore', self.brush_size)
 
         self.current_path = None
         self.current_path_item = None
         
         self.before_erase_state = []
         self.after_erase_state = []
+        self._webtoon_direct_edit_warned = False
 
     def start_stroke(self, scene_pos: QPointF):
         """Starts a new drawing or erasing stroke."""
@@ -40,13 +47,21 @@ class DrawingManager:
         self.current_path = QPainterPath()
         self.current_path.moveTo(scene_pos)
 
-        if self.viewer.current_tool == 'brush':
-            pen = QPen(self.brush_color, self.brush_size, 
-                       Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        tool = self.viewer.current_tool
+        if tool in {'brush', 'paint', 'restore'}:
+            if tool == 'brush':
+                stroke_color = self.brush_color
+            elif tool == 'paint':
+                stroke_color = QColor(self.paint_color)
+                stroke_color.setAlpha(200)
+            else:
+                stroke_color = QColor(0, 180, 255, 190)
+
+            pen = QPen(stroke_color, self.brush_size, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
             self.current_path_item = self._scene.addPath(self.current_path, pen)
             self.current_path_item.setZValue(0.8)  
         
-        elif self.viewer.current_tool == 'eraser':
+        elif tool == 'eraser':
             # Capture the current state before starting erase operation
             self.before_erase_state = []
             try:
@@ -70,17 +85,19 @@ class DrawingManager:
             return
 
         self.current_path.lineTo(scene_pos)
-        if self.viewer.current_tool == 'brush' and self.current_path_item:
+        if self.viewer.current_tool in {'brush', 'paint', 'restore'} and self.current_path_item:
             self.current_path_item.setPath(self.current_path)
         elif self.viewer.current_tool == 'eraser':
             self.erase_at(scene_pos)
 
     def end_stroke(self):
         """Finalizes the current stroke and creates an undo command."""
-        if self.current_path_item:
-            if self.viewer.current_tool == 'brush':
+        if self.current_path_item and self.viewer.current_tool == 'brush':
                 command = BrushStrokeCommand(self.viewer, self.current_path_item)
                 self.viewer.command_emitted.emit(command)
+        elif self.current_path_item and self.viewer.current_tool in {'paint', 'restore'}:
+            self._apply_direct_brush_operation(self.viewer.current_tool)
+            self._scene.removeItem(self.current_path_item)
 
         if self.viewer.current_tool == 'eraser':
             # Capture the current state after erase operation
@@ -115,6 +132,104 @@ class DrawingManager:
         self.current_path = None
         self.current_path_item = None
         self.viewer.drawing_path = None
+
+    def _active_file_path(self):
+        main = self.viewer.parent()
+        if main is None:
+            return None, None
+        curr_idx = getattr(main, "curr_img_idx", -1)
+        image_files = getattr(main, "image_files", [])
+        if not (0 <= curr_idx < len(image_files)):
+            return main, None
+        return main, image_files[curr_idx]
+
+    def _show_webtoon_tool_warning(self):
+        if self._webtoon_direct_edit_warned:
+            return
+        self._webtoon_direct_edit_warned = True
+        QtWidgets.QMessageBox.information(
+            self.viewer,
+            self.viewer.tr("Tool Not Available"),
+            self.viewer.tr("Paint/Restore tools currently work in normal page mode only."),
+        )
+
+    def _extract_qimage_bytes(self, qimg: QImage) -> np.ndarray:
+        ptr = qimg.constBits()
+        arr = np.array(ptr).reshape(qimg.height(), qimg.bytesPerLine())
+        return arr[:, :qimg.width()]
+
+    def _rasterize_path_to_mask(self, path: QPainterPath, width: int, height: int, stroke_width: int) -> np.ndarray:
+        if width <= 0 or height <= 0:
+            return np.zeros((0, 0), dtype=bool)
+
+        qimg = QImage(width, height, QImage.Format_Grayscale8)
+        qimg.fill(0)
+
+        painter = QPainter(qimg)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor(255, 255, 255), stroke_width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
+        if path.elementCount() == 1:
+            e = path.elementAt(0)
+            painter.drawPoint(int(e.x), int(e.y))
+        painter.end()
+
+        mask = self._extract_qimage_bytes(qimg) > 0
+        return mask
+
+    def _apply_direct_brush_operation(self, mode: str):
+        if not self.current_path:
+            return
+
+        main, file_path = self._active_file_path()
+        if main is None or file_path is None:
+            return
+
+        if self.viewer.webtoon_mode:
+            self._show_webtoon_tool_warning()
+            return
+
+        if getattr(main.undo_group, "activeStack", lambda: None)() is None:
+            return
+
+        current_img = self.viewer.get_image_array(include_patches=False)
+        if current_img is None:
+            return
+
+        mask = self._rasterize_path_to_mask(
+            self.current_path,
+            current_img.shape[1],
+            current_img.shape[0],
+            max(1, int(self.brush_size)),
+        )
+        if mask.size == 0 or not np.any(mask):
+            return
+
+        edited = current_img.copy()
+
+        if mode == 'paint':
+            edited[mask] = np.array(
+                [self.paint_color.red(), self.paint_color.green(), self.paint_color.blue()],
+                dtype=np.uint8,
+            )
+        elif mode == 'restore':
+            original = main.image_ctrl.get_original_image(file_path)
+            if original is None:
+                return
+            if original.shape[:2] != edited.shape[:2]:
+                logger.warning(
+                    "Restore skipped due to image size mismatch: original=%s current=%s",
+                    original.shape[:2],
+                    edited.shape[:2],
+                )
+                return
+            edited[mask] = original[mask]
+        else:
+            return
+
+        main.image_ctrl.set_image(edited)
+        main.mark_project_dirty()
 
     def erase_at(self, pos: QPointF):
         erase_path = QPainterPath()
@@ -179,6 +294,15 @@ class DrawingManager:
     def set_brush_size(self, size, scaled_size):
         self.brush_size = size
         self.brush_cursor = self.create_inpaint_cursor("brush", scaled_size)
+        self.paint_cursor = self.create_inpaint_cursor("paint", scaled_size)
+        self.restore_cursor = self.create_inpaint_cursor("restore", scaled_size)
+
+    def set_paint_color(self, color: QColor):
+        if color is None or not color.isValid():
+            return
+        self.paint_color = QColor(color)
+        cursor_size = max(1, int(self.brush_size))
+        self.paint_cursor = self.create_inpaint_cursor("paint", cursor_size)
 
     def set_eraser_size(self, size, scaled_size):
         self.eraser_size = size
@@ -191,6 +315,14 @@ class DrawingManager:
         painter = QPainter(pixmap)
         if cursor_type == "brush":
             painter.setBrush(QBrush(QColor(255, 0, 0, 127)))
+            painter.setPen(Qt.PenStyle.NoPen)
+        elif cursor_type == "paint":
+            color = QColor(self.paint_color)
+            color.setAlpha(180)
+            painter.setBrush(QBrush(color))
+            painter.setPen(Qt.PenStyle.NoPen)
+        elif cursor_type == "restore":
+            painter.setBrush(QBrush(QColor(0, 180, 255, 170)))
             painter.setPen(Qt.PenStyle.NoPen)
         elif cursor_type == "eraser":
             painter.setBrush(QBrush(QColor(0, 0, 0, 0)))

@@ -281,6 +281,36 @@ class ImageStateController:
         rgb_image = imk.read_image(file_path)
         return rgb_image
 
+    def get_original_image(self, file_path: str) -> np.ndarray | None:
+        """Return the original/base image for a page (history index 0)."""
+        if not file_path:
+            return None
+
+        try:
+            in_mem_history = self.main.in_memory_history.get(file_path, [])
+            if in_mem_history:
+                return in_mem_history[0].copy()
+        except Exception:
+            pass
+
+        history = self.main.image_history.get(file_path, [])
+        if history:
+            origin_path = history[0]
+            try:
+                ensure_path_materialized(origin_path)
+            except Exception:
+                pass
+            original = imk.read_image(origin_path)
+            if original is not None:
+                return original
+
+        # Fallback for pages that have not established history yet.
+        current = self.main.image_data.get(file_path)
+        if current is not None:
+            return current.copy()
+
+        return None
+
 
     def clear_state(self):
         # Clear existing image data

@@ -35,6 +35,31 @@ class ToolStateMixin:
         else:
             self.set_tool(None)
 
+    def toggle_paint_tool(self):
+        if self.paint_button.isChecked():
+            self.set_tool("paint")
+            size = self.image_viewer.brush_size
+            self.set_slider_size(size)
+        else:
+            self.set_tool(None)
+
+    def toggle_restore_tool(self):
+        if self.restore_button.isChecked():
+            self.set_tool("restore")
+            size = self.image_viewer.brush_size
+            self.set_slider_size(size)
+        else:
+            self.set_tool(None)
+
+    def pick_paint_color(self):
+        default_color = self.image_viewer.drawing_manager.paint_color
+        color = QtWidgets.QColorDialog.getColor(default_color, self)
+        if color.isValid():
+            self.image_viewer.drawing_manager.set_paint_color(color)
+            self.paint_color_button.setStyleSheet(
+                f"background-color: {color.name()}; border: 1px solid #666; border-radius: 5px;"
+            )
+
     def set_slider_size(self, size: int):
         self.brush_eraser_slider.blockSignals(True)
         self.brush_eraser_slider.setValue(size)
@@ -65,6 +90,8 @@ class ToolStateMixin:
             self.image_viewer.brush_size = size
         elif current_tool == "eraser":
             self.image_viewer.eraser_size = size
+        elif current_tool in {"paint", "restore"}:
+            self.image_viewer.brush_size = size
         else:
             self.image_viewer.brush_size = size
             self.image_viewer.eraser_size = size
@@ -75,7 +102,7 @@ class ToolStateMixin:
                 h, w = image.shape[:2]
                 scaled_size = self.scale_size(size, w, h)
 
-                if current_tool in {"brush", "eraser"}:
+                if current_tool in {"brush", "eraser", "paint", "restore"}:
                     self.image_viewer.set_br_er_size(size, scaled_size)
                 else:
                     self.image_viewer.drawing_manager.set_brush_size(size, scaled_size)
