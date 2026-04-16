@@ -301,6 +301,14 @@ class DrawingManager:
 
         has_active_stack = getattr(main.undo_group, "activeStack", lambda: None)() is not None
         main.image_ctrl.set_image(edited, push=has_active_stack)
+
+        # Direct paint/restore flattens the current visual image into base pixels.
+        # Drop persisted inpaint patch overlays for this page so reloading the page
+        # won't re-apply stale patch images on top and hide new edits.
+        if main.image_patches.get(file_path):
+            main.image_patches.pop(file_path, None)
+            main.in_memory_patches.pop(file_path, None)
+
         main.mark_project_dirty()
         return True
 
