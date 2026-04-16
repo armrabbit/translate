@@ -52,8 +52,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.update_checker.update_available.connect(self.on_update_available)
         self.update_checker.up_to_date.connect(self.on_up_to_date)
         self.update_checker.error_occurred.connect(self.on_update_error)
-        self.update_checker.download_progress.connect(self.on_download_progress)
-        self.update_checker.download_finished.connect(self.on_download_finished)
+        self.update_checker.update_finished.connect(self.on_update_finished)
         self.update_dialog = None
         self.login_dialog = None
 
@@ -849,40 +848,45 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.check_update_button.setText(self.tr("Checking..."))
         self.update_checker.check_for_updates()
 
-    def on_update_available(self, version, release_url, download_url):
+    def on_update_available(self, remote_sha, compare_url, summary):
         if not self._is_background_check:
             self.ui.check_update_button.setEnabled(True)
             self.ui.check_update_button.setText(self.tr("Check for Updates"))
         
-        # Check ignored version
+        # Check ignored update commit
         settings = QSettings("ComicLabs", "ComicTranslate")
-        ignored_version = settings.value("updates/ignored_version", "")
+        ignored_commit = settings.value("updates/ignored_commit", "")
         
-        if self._is_background_check and version == ignored_version:
+        if self._is_background_check and remote_sha == ignored_commit:
             return
 
+        short_sha = str(remote_sha)[:7] if remote_sha else self.tr("unknown")
         msg_box = QtWidgets.QMessageBox(self)
         msg_box.setWindowTitle(self.tr("Update Available"))
         msg_box.setTextFormat(Qt.RichText)
         msg_box.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        msg_box.setText(self.tr("A new version {version} is available.").format(version=version))
-        link_text = self.tr("Release Notes")
-        msg_box.setInformativeText(f'<a href="{release_url}" style="color: #4da6ff;">{link_text}</a>')
+        msg_box.setText(self.tr("A new Git update is available ({sha}).").format(sha=short_sha))
+        informative_parts = [summary] if summary else []
+        if compare_url:
+            informative_parts.append(
+                f'<a href="{compare_url}" style="color: #4da6ff;">{self.tr("View Changes")}</a>'
+            )
+        msg_box.setInformativeText("<br>".join(informative_parts))
         
-        download_btn = msg_box.addButton(self.tr("Yes"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        cancel_btn = msg_box.addButton(self.tr("No"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        update_btn = msg_box.addButton(self.tr("Update Now"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        msg_box.addButton(self.tr("Later"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
         
         dotted_ask_btn = None
         if self._is_background_check:
-            dotted_ask_btn = msg_box.addButton(self.tr("Skip This Version"), QtWidgets.QMessageBox.ButtonRole.ApplyRole)
+            dotted_ask_btn = msg_box.addButton(self.tr("Skip This Update"), QtWidgets.QMessageBox.ButtonRole.ApplyRole)
         
-        msg_box.setDefaultButton(download_btn)
+        msg_box.setDefaultButton(update_btn)
         msg_box.exec()
 
-        if msg_box.clickedButton() == download_btn:
-            self.start_download(download_url)
+        if msg_box.clickedButton() == update_btn:
+            self.start_update()
         elif dotted_ask_btn and msg_box.clickedButton() == dotted_ask_btn:
-            settings.setValue("updates/ignored_version", version)
+            settings.setValue("updates/ignored_commit", remote_sha)
     
     def on_up_to_date(self):
         if self._is_background_check:
@@ -897,26 +901,6 @@ class SettingsPage(QtWidgets.QWidget):
         )
 
     def on_update_error(self, message):
-        msg_lower = (message or "").lower()
-        no_release_metadata = (
-            "releases/latest" in msg_lower
-            and ("404" in msg_lower or "not found" in msg_lower)
-        )
-
-        if no_release_metadata:
-            if self._is_background_check:
-                logger.info("Background update check skipped: no GitHub release published yet.")
-                return
-
-            self.ui.check_update_button.setEnabled(True)
-            self.ui.check_update_button.setText(self.tr("Check for Updates"))
-            self._show_message_box(
-                QtWidgets.QMessageBox.Icon.Information,
-                self.tr("No Release Found"),
-                self.tr("No GitHub release has been published for this repository yet."),
-            )
-            return
-
         if self._is_background_check:
             logger.error(f"Background update check failed: {message}")
             return
@@ -924,7 +908,8 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.check_update_button.setEnabled(True)
         self.ui.check_update_button.setText(self.tr("Check for Updates"))
         if self.update_dialog:
-             self.update_dialog.close()
+            self.update_dialog.close()
+            self.update_dialog = None
         
         self._show_message_box(
             QtWidgets.QMessageBox.Icon.Warning,
@@ -932,30 +917,45 @@ class SettingsPage(QtWidgets.QWidget):
             message
         )
 
-    def start_download(self, url):
-        # Create a progress dialog
-        self.update_dialog = QtWidgets.QProgressDialog(self.tr("Downloading update..."), self.tr("Cancel"), 0, 100, self)
+    def start_update(self):
+        self.ui.check_update_button.setEnabled(False)
+        self.ui.check_update_button.setText(self.tr("Updating..."))
+
+        # Indeterminate progress while running git pull + dependency sync.
+        self.update_dialog = QtWidgets.QProgressDialog(self.tr("Updating from Git..."), None, 0, 0, self)
+        self.update_dialog.setCancelButton(None)
         self.update_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self.update_dialog.show()
-        
-        filename = url.split("/")[-1]
-        self.update_checker.download_installer(url, filename)
 
-    def on_download_progress(self, percent):
-        if self.update_dialog:
-             self.update_dialog.setValue(percent)
+        self.update_checker.apply_update()
 
-    def on_download_finished(self, file_path):
+    def on_update_finished(self, details):
         if self.update_dialog:
-             self.update_dialog.close()
-        
-        # Ask to install
-        if self._ask_yes_no(
-            self.tr("Download Complete"),
-            self.tr("Installer downloaded to {path}. Run it now?").format(path=file_path),
-            default_yes=True
-        ):
-             self.update_checker.run_installer(file_path)
+            self.update_dialog.close()
+            self.update_dialog = None
+
+        self.ui.check_update_button.setEnabled(True)
+        self.ui.check_update_button.setText(self.tr("Check for Updates"))
+
+        if str(details).strip().lower() == "already up to date.":
+            self._show_message_box(
+                QtWidgets.QMessageBox.Icon.Information,
+                self.tr("Up to Date"),
+                self.tr("You are using the latest version."),
+            )
+            return
+
+        from modules.utils.common_utils import restart_application
+
+        restart_now = self._ask_yes_no(
+            self.tr("Update Complete"),
+            self.tr("Update applied successfully.\nRestart now?\n\n{details}").format(details=details),
+            default_yes=True,
+        )
+
+        if restart_now:
+            self.save_settings()
+            restart_application()
 
     def closeEvent(self, event):
         """Ensure login dialog is closed when the settings page itself closes."""
