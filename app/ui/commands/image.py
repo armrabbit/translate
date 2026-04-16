@@ -9,9 +9,22 @@ class SetImageCommand(QUndoCommand):
                  display: bool = True):
         super().__init__()
         self.ct = parent
+        self.file_path = file_path
         self.update_image_history(file_path, img_array)
         self.first = True
         self.display_first_time = display
+
+    def _display_preserving_view(self, img_array: np.ndarray):
+        viewer = self.ct.image_viewer
+        try:
+            prev_transform = viewer.transform()
+            prev_center = viewer.mapToScene(viewer.viewport().rect().center())
+            viewer.display_image_array(img_array, fit=False)
+            viewer.setTransform(prev_transform)
+            viewer.centerOn(prev_center)
+        except Exception:
+            # Fallback: never fail command execution due to viewport-state issues.
+            viewer.display_image_array(img_array, fit=False)
 
     def redo(self):
         if self.first:
@@ -28,7 +41,7 @@ class SetImageCommand(QUndoCommand):
                 
             current_index = self.ct.current_history_index[file_path]
             img_array = self.get_img(file_path, current_index)
-            self.ct.image_viewer.display_image_array(img_array)
+            self._display_preserving_view(img_array)
             self.first = False
 
         if self.ct.curr_img_idx >= 0:
@@ -49,7 +62,7 @@ class SetImageCommand(QUndoCommand):
                 img_array = self.get_img(file_path, current_index)
 
                 self.ct.image_data[file_path] = img_array
-                self.ct.image_viewer.display_image_array(img_array)
+                self._display_preserving_view(img_array)
 
     def undo(self):
         if self.ct.curr_img_idx >= 0:
@@ -71,7 +84,7 @@ class SetImageCommand(QUndoCommand):
                 img_array = self.get_img(file_path, current_index)
 
                 self.ct.image_data[file_path] = img_array
-                self.ct.image_viewer.display_image_array(img_array)
+                self._display_preserving_view(img_array)
 
    
     def update_image_history(self, file_path: str, img_array: np.ndarray):
