@@ -80,6 +80,17 @@ class ManualWorkflowController:
                     scene_mgr.unload_page_scene_items(current_page_idx)
                     current_page_unloaded = True
         else:
+            # In staged multi-page runs (e.g. All workflow), current page scene items
+            # may be intentionally not reloaded yet, leaving main.blk_list empty/stale.
+            # Seed from saved state to avoid overwriting the current page blk_list with
+            # an empty list when saving current state.
+            if current_file in selected_paths:
+                state_blocks = self.main.image_states.get(current_file, {}).get("blk_list", [])
+                if state_blocks and not self.main.blk_list:
+                    self.main.blk_list = [
+                        blk.deep_copy() if hasattr(blk, "deep_copy") else blk
+                        for blk in state_blocks
+                    ]
             self.main.image_ctrl.save_current_image_state()
 
         return {
@@ -287,8 +298,12 @@ class ManualWorkflowController:
                             current_page_idx=context["current_page_idx"],
                             current_page_unloaded=context["current_page_unloaded"],
                         )
-                    elif load_rects:
+                    else:
+                        # Keep runtime blk_list in sync even when load_rects=False
+                        # (used by staged "All" flow). This prevents later stages
+                        # from saving an empty/stale blk_list for the current page.
                         self.main.blk_list = [blk.deep_copy() if hasattr(blk, "deep_copy") else blk for blk in current_blocks]
+                    if not self.main.webtoon_mode and load_rects:
                         self.main.pipeline.load_box_coords(self.main.blk_list)
 
                 if results:
