@@ -2,6 +2,10 @@
 
 All notable changes are tracked here.
 
+## v2.8.4
+- Make editor `Image Upscaler` fallback automatically to Lanczos when Real-ESRGAN dependencies are missing.
+- Prevent hard error popups when `torch/realesrgan/basicsr` are not installed.
+
 ## v2.8.3
 - Switch image upscaler to AI Real-ESRGAN (anime model) with automatic model download.
 - Keep Lanczos as fallback in export/batch flows when AI dependencies are unavailable.

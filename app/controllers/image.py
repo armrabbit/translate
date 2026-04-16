@@ -476,7 +476,7 @@ class ImageStateController:
             if source_image is None or source_image.size == 0:
                 raise ValueError(self.main.tr("Unable to read the current image."))
 
-            upscaled = upscale_image(source_image, factor, strict_ai=True)
+            upscaled = upscale_image(source_image, factor)
             self._reset_page_state_for_upscale(file_path)
             self.set_image(upscaled, push=True)
             self.save_image_state(file_path)
