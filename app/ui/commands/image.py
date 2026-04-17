@@ -136,12 +136,30 @@ class SetImageCommand(QUndoCommand):
             self.ct.current_history_index[file_path] = len(history) - 1
 
     def get_img(self, file_path, current_index):
-        if self.ct.in_memory_history.get(file_path, []):
-            img_array = self.ct.in_memory_history[file_path][current_index]
-        else:
-            img_array = imk.read_image(self.ct.image_history[file_path][current_index])
+        in_mem_history = self.ct.in_memory_history.get(file_path, [])
+        if (
+            in_mem_history
+            and 0 <= current_index < len(in_mem_history)
+            and in_mem_history[current_index] is not None
+        ):
+            return in_mem_history[current_index]
 
-        return img_array
+        history = self.ct.image_history.get(file_path, [])
+        if 0 <= current_index < len(history):
+            img_array = imk.read_image(history[current_index])
+            if img_array is not None:
+                return img_array
+
+        # Fallback: choose latest readable history frame if index is stale/corrupted.
+        for hist_path in reversed(history):
+            if not hist_path:
+                continue
+            img_array = imk.read_image(hist_path)
+            if img_array is not None:
+                return img_array
+
+        # Last resort: use controller loader fallback chain.
+        return self.ct.load_image(file_path)
 
 
 class ToggleSkipImagesCommand(QUndoCommand):

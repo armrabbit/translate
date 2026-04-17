@@ -262,19 +262,31 @@ class ImageStateController:
             return self.main.image_data[file_path]
 
         # Check if the image has been displayed before
-        if file_path in self.main.image_history:
-            # Get the current index from the history
-            current_index = self.main.current_history_index[file_path]
-            
-            # Get the temp file path at the current index
-            current_temp_path = self.main.image_history[file_path][current_index]
-            ensure_path_materialized(current_temp_path)
-            
-            # Load the image from the temp file
-            rgb_image = imk.read_image(current_temp_path)
-            
-            if rgb_image is not None:
-                return rgb_image
+        history = self.main.image_history.get(file_path, [])
+        if history:
+            # Keep history index within bounds (can drift after partial state restores).
+            current_index = int(self.main.current_history_index.get(file_path, len(history) - 1))
+            current_index = max(0, min(current_index, len(history) - 1))
+            self.main.current_history_index[file_path] = current_index
+
+            # Try selected index first, then fallback to the most recent entries.
+            candidate_indices = [current_index]
+            candidate_indices.extend(i for i in range(len(history) - 1, -1, -1) if i != current_index)
+
+            for idx in candidate_indices:
+                hist_path = history[idx]
+                if not hist_path:
+                    continue
+                try:
+                    ensure_path_materialized(hist_path)
+                except Exception:
+                    pass
+                rgb_image = imk.read_image(hist_path)
+                if rgb_image is not None:
+                    # If we recovered via fallback entry, track that as current.
+                    if idx != current_index:
+                        self.main.current_history_index[file_path] = idx
+                    return rgb_image
 
         # If not in memory and not in history (or failed to load from temp),
         # load from the original file path
@@ -1169,6 +1181,8 @@ class ImageStateController:
 
     def display_image_from_loaded(self, rgb_image, index: int, switch_page: bool = True):
         file_path = self.main.image_files[index]
+        if rgb_image is None:
+            raise RuntimeError(f"Failed to load image for page: {os.path.basename(file_path)}")
         self.main.image_data[file_path] = rgb_image
         
         # Initialize history for new images
@@ -1184,7 +1198,7 @@ class ImageStateController:
             self.main.loaded_images.append(file_path)
             if len(self.main.loaded_images) > self.main.max_images_in_memory:
                 oldest_image = self.main.loaded_images.pop(0)
-                del self.main.image_data[oldest_image]
+                self.main.image_data.pop(oldest_image, None)
                 self.main.in_memory_history[oldest_image] = []
 
                 self.main.in_memory_patches.pop(oldest_image, None)
@@ -1253,7 +1267,12 @@ class ImageStateController:
             self.save_image_state(current_file)
 
     def load_image_state(self, file_path: str):
-        rgb_image = self.main.image_data[file_path]
+        rgb_image = self.main.image_data.get(file_path)
+        if rgb_image is None:
+            rgb_image = self.load_image(file_path)
+            if rgb_image is None:
+                raise RuntimeError(f"Failed to materialize image data for: {file_path}")
+            self.main.image_data[file_path] = rgb_image
         viewer = self.main.image_viewer
         needs_default_fit = self._force_default_view_once
         self._force_default_view_once = False

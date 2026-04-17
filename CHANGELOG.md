@@ -2,6 +2,11 @@
 
 All notable changes are tracked here.
 
+## v2.8.12
+- Fix page reload edge case after upscaling: image loader now recovers from stale/missing history entries and falls back to latest valid frame.
+- Fix potential failure when returning to edited pages by lazily materializing `image_data` in `load_image_state` when cache is empty.
+- Harden `SetImageCommand` history reads to avoid index mismatch crashes between `in_memory_history` and `image_history`.
+
 ## v2.8.11
 - Fix `Restore` tool baseline resolution by using composed restore source (`original + persisted clean patches`) instead of raw original only.
 - Fix `Restore` tool failing after size-changing edits (e.g. upscaler) by remapping to a matching-size history image when available.
