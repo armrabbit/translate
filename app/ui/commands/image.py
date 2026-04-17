@@ -108,32 +108,74 @@ class SetImageCommand(QUndoCommand):
 
    
     def update_image_history(self, file_path: str, img_array: np.ndarray):
-        im = self.ct.load_image(file_path)
+        im = self._get_current_image_for_compare(file_path)
 
-        if not np.array_equal(im, img_array):
-            self.ct.image_data[file_path] = img_array
-            
-            # Update file path history
-            history = self.ct.image_history[file_path]
-            current_index = self.ct.current_history_index[file_path]
-            
-            # Remove any future history if we're not at the end
-            del history[current_index + 1:]
-            
-            # # Save new image to temp file and add to history
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png', dir=self.ct.temp_dir)
-            imk.write_image(temp_file.name, img_array)
-            temp_file.close()
+        unchanged = False
+        if im is img_array:
+            unchanged = True
+        elif (
+            im is not None
+            and hasattr(im, "shape")
+            and hasattr(im, "dtype")
+            and im.shape == img_array.shape
+            and im.dtype == img_array.dtype
+        ):
+            unchanged = np.array_equal(im, img_array)
 
-            history.append(temp_file.name)
+        if unchanged:
+            return
 
-            # Update in-memory history if this image is loaded
-            if self.ct.in_memory_history.get(file_path, []):
-                in_mem_history = self.ct.in_memory_history[file_path]
-                del in_mem_history[current_index + 1:]
-                in_mem_history.append(img_array.copy())
+        self.ct.image_data[file_path] = img_array
+        
+        # Update file path history
+        history = self.ct.image_history[file_path]
+        current_index = self.ct.current_history_index[file_path]
+        
+        # Remove any future history if we're not at the end
+        del history[current_index + 1:]
+        
+        # Save new image to temp file and add to history
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png', dir=self.ct.temp_dir)
+        imk.write_image(temp_file.name, img_array)
+        temp_file.close()
 
-            self.ct.current_history_index[file_path] = len(history) - 1
+        history.append(temp_file.name)
+
+        # Update in-memory history if this image is loaded
+        if self.ct.in_memory_history.get(file_path, []):
+            in_mem_history = self.ct.in_memory_history[file_path]
+            del in_mem_history[current_index + 1:]
+            in_mem_history.append(img_array.copy())
+
+        self.ct.current_history_index[file_path] = len(history) - 1
+
+    def _get_current_image_for_compare(self, file_path: str):
+        cached = self.ct.image_data.get(file_path)
+        if cached is not None:
+            return cached
+
+        history = self.ct.image_history.get(file_path, [])
+        if not history:
+            return self.ct.load_image(file_path)
+
+        current_index = int(self.ct.current_history_index.get(file_path, len(history) - 1))
+        current_index = max(0, min(current_index, len(history) - 1))
+
+        in_mem_history = self.ct.in_memory_history.get(file_path, [])
+        if (
+            in_mem_history
+            and 0 <= current_index < len(in_mem_history)
+            and in_mem_history[current_index] is not None
+        ):
+            return in_mem_history[current_index]
+
+        hist_path = history[current_index]
+        if hist_path:
+            img = imk.read_image(hist_path)
+            if img is not None:
+                return img
+
+        return self.ct.load_image(file_path)
 
     def get_img(self, file_path, current_index):
         in_mem_history = self.ct.in_memory_history.get(file_path, [])

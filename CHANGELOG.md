@@ -2,6 +2,12 @@
 
 All notable changes are tracked here.
 
+## v2.8.13
+- Improve page-switch responsiveness by adding a RAM fast path in async navigation (skip worker dispatch when image is already cached).
+- Improve sidebar thumbnail performance by moving archive materialization off the UI thread and increasing thumbnail cache/preload window.
+- Reduce thumbnail CPU cost by avoiding upscaling tiny images and switching thumbnail resample mode from Lanczos to Bilinear.
+- Optimize image history updates by preferring in-memory current frame for comparisons, reducing unnecessary disk reads during edits.
+
 ## v2.8.12
 - Fix page reload edge case after upscaling: image loader now recovers from stale/missing history entries and falls back to latest valid frame.
 - Fix potential failure when returning to edited pages by lazily materializing `image_data` in `load_image_state` when cache is empty.

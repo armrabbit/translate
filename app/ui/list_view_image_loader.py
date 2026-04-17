@@ -1,4 +1,3 @@
-import os
 from collections import deque
 from typing import Set
 import imkit as imk
@@ -72,15 +71,18 @@ class ImageLoadWorker(QObject):
             height, width = image.shape[:2]
             target_width, target_height = target_size.width(), target_size.height()
             
-            # Calculate scaling factor to fit within target size
+            # Calculate scaling factor to fit within target size.
+            # Never upscale tiny images for list thumbnails to save CPU.
             scale_x = target_width / width
             scale_y = target_height / height
-            scale = min(scale_x, scale_y)
+            scale = min(scale_x, scale_y, 1.0)
             
             new_width = int(width * scale)
             new_height = int(height * scale)
             
-            resized_image = imk.resize(image, (new_width, new_height), mode=Image.Resampling.LANCZOS)
+            # Thumbnails are tiny; BILINEAR is much faster than LANCZOS with
+            # negligible visual difference at this size.
+            resized_image = imk.resize(image, (new_width, new_height), mode=Image.Resampling.BILINEAR)
             
             # Convert to QImage. Use a deep copy so the image outlives the numpy buffer.
             h, w, ch = resized_image.shape
@@ -134,8 +136,8 @@ class ListViewImageLoader(QObject):
                 scrollbar.valueChanged.connect(self._on_scroll)
         
         # Configuration
-        self.max_loaded_images = 20  # Maximum images to keep in memory
-        self.preload_buffer = 2  # Number of items to preload outside visible area
+        self.max_loaded_images = 60  # Keep more thumbnails to reduce reload churn
+        self.preload_buffer = 3  # Number of items to preload outside visible area
         
     def set_file_paths(self, file_paths: list[str]):
         """Set the file paths for lazy loading."""
@@ -264,12 +266,13 @@ class ListViewImageLoader(QObject):
         """Queue an image for loading."""
         if 0 <= index < len(self.file_paths):
             file_path = self.file_paths[index]
-            if ensure_path_materialized(file_path) or os.path.exists(file_path):
-                self.queue_image_load_requested.emit(index, file_path, self.avatar_size)
-                
-                # Start worker thread and process queue if not already running
-                if not self.worker_thread.isRunning():
-                    self.worker_thread.start()
+            # Queue directly; the worker materializes/reads in background.
+            # This avoids heavy archive extraction work on the UI thread.
+            self.queue_image_load_requested.emit(index, file_path, self.avatar_size)
+
+            # Start worker thread and process queue if not already running
+            if not self.worker_thread.isRunning():
+                self.worker_thread.start()
 
     def _on_image_loaded(self, index: int, file_path: str, image: QImage):
         """Handle when an image has been loaded."""

@@ -966,6 +966,13 @@ class ImageStateController:
         req_id = self._nav_request_id
         file_path = self.main.image_files[index]
 
+        # Fast path: if image is already in RAM, display immediately and skip
+        # worker/threadpool overhead for snappier page switching.
+        cached = self.main.image_data.get(file_path)
+        if cached is not None:
+            self.display_image_from_loaded(cached, index)
+            return
+
         def _bg_load():
             img = self.load_image(file_path)
             # Preload inpaint patches into memory so that load_patch_state
