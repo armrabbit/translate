@@ -2,6 +2,11 @@
 
 All notable changes are tracked here.
 
+## v2.8.11
+- Fix `Restore` tool baseline resolution by using composed restore source (`original + persisted clean patches`) instead of raw original only.
+- Fix `Restore` tool failing after size-changing edits (e.g. upscaler) by remapping to a matching-size history image when available.
+- Add safer restore mismatch logging for easier debugging when no compatible history frame exists.
+
 ## v2.8.10
 - Fix editor camera jump after AI upscaler: keep viewport scene bounds synced to new image size when replacing pixmap.
 - Fix post-upscale pan lock (unable to move to the right) by preserving view using image bounds instead of stale scene bounds.

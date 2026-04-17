@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QBrush, QPen, QPainterPath, QCursor, QPixmap, 
 from app.ui.commands.brush import BrushStrokeCommand, ClearBrushStrokesCommand, \
                             SegmentBoxesCommand, EraseUndoCommand
 from app.ui.commands.base import PathCommandBase as pcb
+from app.path_materialization import ensure_path_materialized
 import imkit as imk
 
 try:
@@ -223,6 +224,78 @@ class DrawingManager:
             self.viewer.tr("Paint/Restore tools currently work in normal page mode only."),
         )
 
+    def _find_history_image_with_shape(self, main, file_path: str, target_shape: tuple[int, int]) -> np.ndarray | None:
+        target_h, target_w = target_shape
+
+        # Prefer in-memory history first for speed.
+        for hist_img in main.in_memory_history.get(file_path, []):
+            if hist_img is None:
+                continue
+            if getattr(hist_img, "shape", None) is None or len(hist_img.shape) < 2:
+                continue
+            if hist_img.shape[0] == target_h and hist_img.shape[1] == target_w:
+                return hist_img.copy()
+
+        # Fallback to persisted history files.
+        for hist_path in main.image_history.get(file_path, []):
+            try:
+                ensure_path_materialized(hist_path)
+            except Exception:
+                pass
+            try:
+                hist_img = imk.read_image(hist_path)
+            except Exception:
+                continue
+            if hist_img is None or getattr(hist_img, "shape", None) is None or len(hist_img.shape) < 2:
+                continue
+            if hist_img.shape[0] == target_h and hist_img.shape[1] == target_w:
+                return hist_img
+
+        return None
+
+    def _resolve_restore_source_image(self, main, file_path: str, edited: np.ndarray) -> np.ndarray | None:
+        source = None
+        image_ctrl = getattr(main, "image_ctrl", None)
+
+        # Preferred baseline: original + persisted clean patches composition.
+        if image_ctrl is not None and hasattr(image_ctrl, "get_restore_base_image"):
+            try:
+                source = image_ctrl.get_restore_base_image(file_path)
+            except Exception:
+                source = None
+
+        # Backward-compatible fallback if restore baseline composition is unavailable.
+        if source is None and image_ctrl is not None and hasattr(image_ctrl, "get_original_image"):
+            try:
+                source = image_ctrl.get_original_image(file_path)
+            except Exception:
+                source = None
+
+        if source is None:
+            return None
+
+        if source.shape[:2] == edited.shape[:2]:
+            return source
+
+        # When image size changed (e.g. after upscaling), remap baseline to a
+        # history entry with matching dimensions instead of silently doing nothing.
+        matched = self._find_history_image_with_shape(main, file_path, edited.shape[:2])
+        if matched is not None:
+            logger.info(
+                "Restore baseline remapped from shape %s to matching history shape %s for %s",
+                source.shape[:2],
+                edited.shape[:2],
+                file_path,
+            )
+            return matched
+
+        logger.warning(
+            "Restore skipped due to image size mismatch with no matching history frame: source=%s current=%s",
+            source.shape[:2],
+            edited.shape[:2],
+        )
+        return None
+
     def _extract_qimage_bytes(self, qimg: QImage) -> np.ndarray:
         ptr = qimg.constBits()
         arr = np.array(ptr).reshape(qimg.height(), qimg.bytesPerLine())
@@ -284,18 +357,10 @@ class DrawingManager:
                 dtype=np.uint8,
             )
         elif mode == 'restore':
-            # Restore tool should pull pixels from the original source image.
-            original = main.image_ctrl.get_original_image(file_path)
-            if original is None:
+            restore_source = self._resolve_restore_source_image(main, file_path, edited)
+            if restore_source is None:
                 return False
-            if original.shape[:2] != edited.shape[:2]:
-                logger.warning(
-                    "Restore skipped due to image size mismatch: original=%s current=%s",
-                    original.shape[:2],
-                    edited.shape[:2],
-                )
-                return False
-            edited[mask] = original[mask]
+            edited[mask] = restore_source[mask]
         else:
             return False
 
