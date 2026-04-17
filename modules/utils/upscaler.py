@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import os
 import site
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import threading
 import types
+import urllib.request
 from typing import Any
 
 import imkit as imk
@@ -20,9 +22,11 @@ from modules.utils.paths import get_user_data_dir
 DEFAULT_UPSCALE_FACTOR = 1
 SUPPORTED_UPSCALE_FACTORS = (1, 2, 4)
 REALESRGAN_MODEL_URL = (
-    "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/"
+    "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/"
     "RealESRGAN_x4plus_anime_6B.pth"
 )
+REALESRGAN_RELEASES_API = "https://api.github.com/repos/xinntao/Real-ESRGAN/releases"
+REALESRGAN_MODEL_FILENAME = "RealESRGAN_x4plus_anime_6B.pth"
 REALESRGAN_MODEL_PATH = os.path.join(
     get_user_data_dir(),
     "models",
@@ -37,6 +41,8 @@ _realesrgan_upsampler = None
 _deps_install_attempted = False
 _deps_install_error: str | None = None
 _fallback_warning_emitted = False
+_resolved_model_urls: list[str] | None = None
+MIN_MODEL_FILE_SIZE_BYTES = 1 * 1024 * 1024
 
 
 def _is_auto_install_enabled() -> bool:
@@ -124,6 +130,7 @@ def _auto_install_realesrgan_dependencies() -> None:
     try:
         try:
             import torch  # noqa: F401
+            import torchvision  # noqa: F401
         except Exception:
             try:
                 _run_pip_install(
@@ -150,7 +157,8 @@ def _auto_install_realesrgan_dependencies() -> None:
             reason = f" ({reason})"
         _deps_install_error = (
             "Automatic install for Real-ESRGAN dependencies failed. "
-            "Please install manually: `pip install --user torch realesrgan basicsr`"
+            "Please install manually: "
+            "`pip install --user torch torchvision realesrgan basicsr`"
             f"{reason}"
         )
         raise RuntimeError(_deps_install_error) from exc
@@ -191,22 +199,89 @@ def _lanczos_upscale(image: np.ndarray, factor: int) -> np.ndarray:
 
 
 def _ensure_realesrgan_model() -> str:
-    if os.path.exists(REALESRGAN_MODEL_PATH):
+    global _resolved_model_urls
+    if os.path.exists(REALESRGAN_MODEL_PATH) and os.path.getsize(REALESRGAN_MODEL_PATH) >= MIN_MODEL_FILE_SIZE_BYTES:
         return REALESRGAN_MODEL_PATH
 
     with _realesrgan_lock:
-        if os.path.exists(REALESRGAN_MODEL_PATH):
+        if os.path.exists(REALESRGAN_MODEL_PATH) and os.path.getsize(REALESRGAN_MODEL_PATH) >= MIN_MODEL_FILE_SIZE_BYTES:
             return REALESRGAN_MODEL_PATH
 
+        if _resolved_model_urls is None:
+            resolved = [REALESRGAN_MODEL_URL]
+            try:
+                req = urllib.request.Request(
+                    REALESRGAN_RELEASES_API,
+                    headers={
+                        "Accept": "application/vnd.github+json",
+                        "User-Agent": "comic-translate-upscaler",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    data = json.load(response)
+                api_urls = []
+                if isinstance(data, list):
+                    for release in data:
+                        assets = release.get("assets", []) if isinstance(release, dict) else []
+                        for asset in assets:
+                            if not isinstance(asset, dict):
+                                continue
+                            if asset.get("name") != REALESRGAN_MODEL_FILENAME:
+                                continue
+                            download_url = asset.get("browser_download_url")
+                            if isinstance(download_url, str) and download_url:
+                                api_urls.append(download_url)
+                # Prefer latest discovered URL first, then stable fallback.
+                for url in api_urls:
+                    if url not in resolved:
+                        resolved.insert(0, url)
+            except Exception as exc:
+                logger.debug("Unable to resolve model URL from GitHub API: %s", exc)
+
+            _resolved_model_urls = resolved
+
         os.makedirs(os.path.dirname(REALESRGAN_MODEL_PATH), exist_ok=True)
+        if os.path.exists(REALESRGAN_MODEL_PATH):
+            try:
+                stale_size = os.path.getsize(REALESRGAN_MODEL_PATH)
+            except Exception:
+                stale_size = -1
+            if stale_size < MIN_MODEL_FILE_SIZE_BYTES:
+                logger.warning(
+                    "Discarding invalid Real-ESRGAN model file (size=%s): %s",
+                    stale_size,
+                    REALESRGAN_MODEL_PATH,
+                )
+                try:
+                    os.remove(REALESRGAN_MODEL_PATH)
+                except Exception:
+                    pass
         model_name = os.path.basename(REALESRGAN_MODEL_PATH)
         notify_download_event("start", model_name)
+        last_error = None
         try:
-            download_url_to_file(
-                REALESRGAN_MODEL_URL,
-                REALESRGAN_MODEL_PATH,
-                progress=True,
-            )
+            for model_url in _resolved_model_urls:
+                try:
+                    download_url_to_file(
+                        model_url,
+                        REALESRGAN_MODEL_PATH,
+                        progress=True,
+                    )
+                    logger.info("Downloaded Real-ESRGAN model from: %s", model_url)
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning("Model download failed from %s: %s", model_url, exc)
+                    part_path = f"{REALESRGAN_MODEL_PATH}.part"
+                    if os.path.exists(part_path):
+                        try:
+                            os.remove(part_path)
+                        except Exception:
+                            pass
+            else:
+                raise RuntimeError(
+                    "Failed to download Real-ESRGAN model from all known sources."
+                ) from last_error
         finally:
             notify_download_event("end", model_name)
 
@@ -225,7 +300,7 @@ def _build_realesrgan_upsampler():
         else:
             raise RuntimeError(
                 "Real-ESRGAN dependencies are missing. Please install: "
-                "`pip install torch realesrgan basicsr`"
+                "`pip install torch torchvision realesrgan basicsr`"
             ) from exc
 
     model_path = _ensure_realesrgan_model()

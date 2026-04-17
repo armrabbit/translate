@@ -2,6 +2,18 @@
 
 All notable changes are tracked here.
 
+## v2.8.9
+- Harden AI upscaler dependency recovery by checking both `torch` and `torchvision` before skipping install.
+- Fix dependency guidance text to include `torchvision` in manual install command.
+- Validate downloaded Real-ESRGAN model file size and auto-redownload if file is invalid/corrupted.
+- Make editor `Image Upscaler` enforce AI backend (`strict_ai`) instead of silently falling back to Lanczos.
+- Fix `SyntaxWarning` in Pororo utility punctuation stripping (`invalid escape sequence`) to keep Python 3.12+ clean.
+
+## v2.8.8
+- Fix AI upscaler model URL (old URL returned 404) by switching fallback to a valid Real-ESRGAN release asset.
+- Add GitHub Releases API discovery for `RealESRGAN_x4plus_anime_6B.pth` so model download can adapt when release tags change.
+- Improve model download logs and fallback handling across multiple candidate URLs.
+
 ## v2.8.7
 - Fix Real-ESRGAN startup failure with newer `torchvision` where `torchvision.transforms.functional_tensor` is missing.
 - Add runtime compatibility shim so `basicsr/realesrgan` can import successfully without downgrading `torchvision`.
