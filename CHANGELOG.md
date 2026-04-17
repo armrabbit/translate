@@ -2,6 +2,10 @@
 
 All notable changes are tracked here.
 
+## v2.8.7
+- Fix Real-ESRGAN startup failure with newer `torchvision` where `torchvision.transforms.functional_tensor` is missing.
+- Add runtime compatibility shim so `basicsr/realesrgan` can import successfully without downgrading `torchvision`.
+
 ## v2.8.6
 - Improve AI upscaler auto-install reliability on Windows by forcing `--user` install and adding user site-packages to `sys.path`.
 - Include underlying install/import reason in fallback error logs.

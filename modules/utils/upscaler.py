@@ -7,6 +7,7 @@ import site
 import subprocess
 import sys
 import threading
+import types
 from typing import Any
 
 import imkit as imk
@@ -61,7 +62,48 @@ def _ensure_user_site_on_path() -> None:
         logger.info("Added user site-packages to sys.path: %s", user_site)
 
 
+def _ensure_torchvision_compat_shim() -> None:
+    """
+    Provide `torchvision.transforms.functional_tensor` for newer torchvision.
+
+    `basicsr` imports this legacy module, but some newer torchvision builds
+    removed it. We expose a lightweight shim that forwards attributes to
+    `torchvision.transforms.functional`.
+    """
+    module_name = "torchvision.transforms.functional_tensor"
+    if module_name in sys.modules:
+        return
+
+    try:
+        import torchvision.transforms.functional_tensor  # noqa: F401
+        return
+    except Exception:
+        pass
+
+    try:
+        from torchvision.transforms import functional as tv_functional
+    except Exception:
+        return
+
+    shim = types.ModuleType(module_name)
+
+    def _fallback_getattr(name: str):
+        return getattr(tv_functional, name)
+
+    shim.__getattr__ = _fallback_getattr  # type: ignore[attr-defined]
+    if hasattr(tv_functional, "__all__"):
+        shim.__all__ = list(tv_functional.__all__)  # type: ignore[attr-defined]
+
+    # Ensure direct access for the most common symbol used by basicsr.
+    if hasattr(tv_functional, "rgb_to_grayscale"):
+        shim.rgb_to_grayscale = tv_functional.rgb_to_grayscale
+
+    sys.modules[module_name] = shim
+    logger.info("Applied torchvision compatibility shim: %s", module_name)
+
+
 def _import_realesrgan_dependencies():
+    _ensure_torchvision_compat_shim()
     import torch
     from basicsr.archs.rrdbnet_arch import RRDBNet
     from realesrgan import RealESRGANer
