@@ -1,6 +1,7 @@
 import numpy as np
 import tempfile
 from PySide6.QtGui import QUndoCommand
+from PySide6.QtCore import QPointF
 import imkit as imk
 
 
@@ -18,10 +19,25 @@ class SetImageCommand(QUndoCommand):
         viewer = self.ct.image_viewer
         try:
             prev_transform = viewer.transform()
+            prev_scene_rect = viewer.sceneRect()
             prev_center = viewer.mapToScene(viewer.viewport().rect().center())
+            rel_x = 0.5
+            rel_y = 0.5
+            if prev_scene_rect.width() > 0:
+                rel_x = (prev_center.x() - prev_scene_rect.left()) / prev_scene_rect.width()
+            if prev_scene_rect.height() > 0:
+                rel_y = (prev_center.y() - prev_scene_rect.top()) / prev_scene_rect.height()
+            rel_x = max(0.0, min(1.0, float(rel_x)))
+            rel_y = max(0.0, min(1.0, float(rel_y)))
+
             viewer.display_image_array(img_array, fit=False)
+            new_scene_rect = viewer.sceneRect()
+            target_center = QPointF(
+                new_scene_rect.left() + rel_x * max(0.0, new_scene_rect.width()),
+                new_scene_rect.top() + rel_y * max(0.0, new_scene_rect.height()),
+            )
             viewer.setTransform(prev_transform)
-            viewer.centerOn(prev_center)
+            viewer.centerOn(target_center)
         except Exception:
             # Fallback: never fail command execution due to viewport-state issues.
             viewer.display_image_array(img_array, fit=False)

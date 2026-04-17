@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import site
 import subprocess
 import sys
 import threading
@@ -34,6 +35,7 @@ _realesrgan_lock = threading.RLock()
 _realesrgan_upsampler = None
 _deps_install_attempted = False
 _deps_install_error: str | None = None
+_fallback_warning_emitted = False
 
 
 def _is_auto_install_enabled() -> bool:
@@ -42,9 +44,21 @@ def _is_auto_install_enabled() -> bool:
 
 
 def _run_pip_install(args: list[str]) -> None:
-    cmd = [sys.executable, "-m", "pip", "install", *args]
+    cmd = [sys.executable, "-m", "pip", "install", "--user", *args]
     logger.info("Installing Real-ESRGAN dependency: %s", " ".join(args))
     subprocess.check_call(cmd)
+
+
+def _ensure_user_site_on_path() -> None:
+    """Ensure user-site packages are importable in the current process."""
+    try:
+        user_site = site.getusersitepackages()
+    except Exception:
+        user_site = None
+
+    if user_site and user_site not in sys.path and os.path.isdir(user_site):
+        sys.path.append(user_site)
+        logger.info("Added user site-packages to sys.path: %s", user_site)
 
 
 def _import_realesrgan_dependencies():
@@ -56,6 +70,8 @@ def _import_realesrgan_dependencies():
 
 def _auto_install_realesrgan_dependencies() -> None:
     global _deps_install_attempted, _deps_install_error
+    _ensure_user_site_on_path()
+
     with _realesrgan_lock:
         if _deps_install_attempted:
             if _deps_install_error:
@@ -80,14 +96,20 @@ def _auto_install_realesrgan_dependencies() -> None:
                 _run_pip_install(["torch", "torchvision"])
 
         _run_pip_install(["realesrgan", "basicsr"])
+        _ensure_user_site_on_path()
         importlib.invalidate_caches()
         _import_realesrgan_dependencies()
         _deps_install_error = None
         logger.info("Real-ESRGAN dependencies installed successfully.")
     except Exception as exc:
+        logger.exception("Automatic install for Real-ESRGAN dependencies failed: %s", exc)
+        reason = str(exc).strip()
+        if reason:
+            reason = f" ({reason})"
         _deps_install_error = (
             "Automatic install for Real-ESRGAN dependencies failed. "
-            "Please install manually: `pip install torch realesrgan basicsr`"
+            "Please install manually: `pip install --user torch realesrgan basicsr`"
+            f"{reason}"
         )
         raise RuntimeError(_deps_install_error) from exc
 
@@ -150,6 +172,7 @@ def _ensure_realesrgan_model() -> str:
 
 
 def _build_realesrgan_upsampler():
+    _ensure_user_site_on_path()
     try:
         torch, RRDBNet, RealESRGANer = _import_realesrgan_dependencies()
     except Exception as exc:
@@ -208,6 +231,7 @@ def _realesrgan_upscale(image: np.ndarray, factor: int) -> np.ndarray:
 
 
 def upscale_image(image: np.ndarray, factor: int, strict_ai: bool = False) -> np.ndarray:
+    global _fallback_warning_emitted
     normalized_factor = normalize_upscale_factor(factor)
     if normalized_factor <= 1 or image is None or image.size == 0:
         return image
@@ -217,8 +241,15 @@ def upscale_image(image: np.ndarray, factor: int, strict_ai: bool = False) -> np
     except Exception as exc:
         if strict_ai:
             raise
-        logger.warning(
-            "Real-ESRGAN unavailable; falling back to Lanczos resize: %s",
-            exc,
-        )
+        if not _fallback_warning_emitted:
+            logger.warning(
+                "Real-ESRGAN unavailable; falling back to Lanczos resize: %s",
+                exc,
+            )
+            _fallback_warning_emitted = True
+        else:
+            logger.debug(
+                "Real-ESRGAN unavailable; using Lanczos fallback: %s",
+                exc,
+            )
         return _lanczos_upscale(image, normalized_factor)

@@ -32,7 +32,7 @@ From current settings UI:
 - Optional:
   - NVIDIA GPU: `onnxruntime-gpu`
   - Archive tools for some comic formats (`.cbr`): `WinRAR` or `7-Zip` in `PATH`
-  - AI upscaler (Real-ESRGAN): `pip install torch realesrgan basicsr`
+  - AI upscaler (Real-ESRGAN): `pip install --user torch realesrgan basicsr`
   - Note: app can auto-install these AI upscaler dependencies on first use
     (set `COMICTRANSLATE_AUTO_INSTALL_UPSCALER_DEPS=0` to disable)
 

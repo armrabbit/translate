@@ -2,6 +2,11 @@
 
 All notable changes are tracked here.
 
+## v2.8.6
+- Improve AI upscaler auto-install reliability on Windows by forcing `--user` install and adding user site-packages to `sys.path`.
+- Include underlying install/import reason in fallback error logs.
+- Reduce repeated fallback warnings (first warning only, subsequent messages as debug).
+
 ## v2.8.5
 - Add automatic dependency install for AI upscaler (`torch`, `realesrgan`, `basicsr`) on first use.
 - Add env switch `COMICTRANSLATE_AUTO_INSTALL_UPSCALER_DEPS=0` to disable auto-install.
