@@ -2,6 +2,11 @@
 
 All notable changes are tracked here.
 
+## v2.8.14
+- Fix `BufferError: memoryview: underlying buffer is not C-contiguous` when switching pages after upscaling.
+- Harden `ImageViewer.qimage_from_array` with contiguous-buffer normalization and safer RGB/dtype handling.
+- Keep a backing numpy reference for QImage buffer lifetime safety during page redraws.
+
 ## v2.8.13
 - Improve page-switch responsiveness by adding a RAM fast path in async navigation (skip worker dispatch when image is already cached).
 - Improve sidebar thumbnail performance by moving archive materialization off the UI thread and increasing thumbnail cache/preload window.

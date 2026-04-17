@@ -329,9 +329,29 @@ class ImageViewer(QGraphicsView):
         return arr
     
     def qimage_from_array(self, img_array: np.ndarray):
-        height, width, channel = img_array.shape
+        arr = np.asarray(img_array)
+        if arr.ndim != 3:
+            raise ValueError(f"Expected HxWxC image array, got shape={arr.shape}")
+
+        # Keep only RGB channels if extra channels are present.
+        if arr.shape[2] > 3:
+            arr = arr[:, :, :3]
+        if arr.shape[2] != 3:
+            raise ValueError(f"Expected 3 channels for RGB image, got shape={arr.shape}")
+
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+
+        # QImage from raw buffer requires contiguous memory.
+        if not arr.flags.c_contiguous:
+            arr = np.ascontiguousarray(arr)
+
+        height, width, _ = arr.shape
         bytes_per_line = 3 * width
-        qimage = QtGui.QImage(img_array.data, width, height, bytes_per_line, QtGui.QImage.Format.Format_RGB888)
+
+        # Keep a reference alive while QImage exists to prevent dangling buffer.
+        self._qimage_backing_array = arr
+        qimage = QtGui.QImage(arr.data, width, height, bytes_per_line, QtGui.QImage.Format.Format_RGB888)
         return qimage
 
     def display_image_array(self, img_array: np.ndarray, fit: bool = True):
