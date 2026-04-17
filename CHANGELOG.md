@@ -2,6 +2,10 @@
 
 All notable changes are tracked here.
 
+## v2.8.10
+- Fix editor camera jump after AI upscaler: keep viewport scene bounds synced to new image size when replacing pixmap.
+- Fix post-upscale pan lock (unable to move to the right) by preserving view using image bounds instead of stale scene bounds.
+
 ## v2.8.9
 - Harden AI upscaler dependency recovery by checking both `torch` and `torchvision` before skipping install.
 - Fix dependency guidance text to include `torchvision` in manual install command.

@@ -19,7 +19,9 @@ class SetImageCommand(QUndoCommand):
         viewer = self.ct.image_viewer
         try:
             prev_transform = viewer.transform()
-            prev_scene_rect = viewer.sceneRect()
+            prev_scene_rect = viewer.photo.sceneBoundingRect()
+            if prev_scene_rect.isNull():
+                prev_scene_rect = viewer.sceneRect()
             prev_center = viewer.mapToScene(viewer.viewport().rect().center())
             rel_x = 0.5
             rel_y = 0.5
@@ -31,7 +33,9 @@ class SetImageCommand(QUndoCommand):
             rel_y = max(0.0, min(1.0, float(rel_y)))
 
             viewer.display_image_array(img_array, fit=False)
-            new_scene_rect = viewer.sceneRect()
+            new_scene_rect = viewer.photo.sceneBoundingRect()
+            if new_scene_rect.isNull():
+                new_scene_rect = viewer.sceneRect()
             target_center = QPointF(
                 new_scene_rect.left() + rel_x * max(0.0, new_scene_rect.width()),
                 new_scene_rect.top() + rel_y * max(0.0, new_scene_rect.height()),

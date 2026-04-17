@@ -354,6 +354,11 @@ class ImageViewer(QGraphicsView):
         if pixmap and not pixmap.isNull():
             self.empty = False
             self.photo.setPixmap(pixmap)
+            # Keep scene bounds synced with current image size even when we skip fitInView.
+            # Without this, scrollbars can stay constrained to old image dimensions.
+            image_rect = self.photo.boundingRect()
+            if not image_rect.isNull():
+                self.setSceneRect(image_rect)
             if fit:
                 self.fitInView()
         else:
